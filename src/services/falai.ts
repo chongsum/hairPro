@@ -23,17 +23,23 @@ const IMAGE_MODELS = {
   FLUX_PRO_ULTRA: "fal-ai/flux-pro/v1.1-ultra",
   // Realism focused
   FLUX_REALISM: "fal-ai/flux-realism",
-  // Google Nano Banana Pro (Gemini 3 Pro Image) - Best for character consistency
+  // Google edit models - Best for character consistency
   NANO_BANANA_PRO: "fal-ai/nano-banana-pro/edit",
   GEMINI_3_PRO: "fal-ai/gemini-3-pro-image-preview/edit",
 };
 
-// Models that use image_urls (array) instead of image_url
-const GOOGLE_MODELS = [
-  "fal-ai/nano-banana-pro/edit",
-  "fal-ai/gemini-3-pro-image-preview/edit",
-  "fal-ai/nano-banana-pro",
-  "fal-ai/gemini-3-pro-image-preview",
+// Models that use image_url (singular) instead of image_urls (array)
+const MODELS_USING_SINGULAR_IMAGE_URL = [
+  "flux/dev/image-to-image",
+  "flux-dev-image-to-image",
+  "flux/schnell",
+  "hair-change",
+  "image-editing",
+];
+
+// Models that require @Image1, @Image2 syntax in prompt (Kling models)
+const MODELS_USING_IMAGE_REFERENCE_SYNTAX = [
+  "kling-image",
 ];
 
 // Default model for hairstyle generation
@@ -59,43 +65,79 @@ interface FalImageResult {
 
 /**
  * Generate a new hairstyle using Fal AI's image-to-image model
+ * @param base64Image - User's photo (base64 or data URL)
+ * @param styleDescription - Text description of target hairstyle (already includes full prompt)
+ * @param gender - User's gender
+ * @param referenceImageUrl - Optional reference image URL for style transfer
  */
 export const generateHairstyle = async (
   base64Image: string,
   styleDescription: string,
-  gender: string
+  gender: string,
+  referenceImageUrl?: string
 ): Promise<string> => {
   try {
     console.log("=== STARTING FAL AI IMAGE GENERATION ===");
     console.log("Using model:", DEFAULT_HAIRSTYLE_MODEL);
+    console.log("Reference image provided:", !!referenceImageUrl);
 
-    // Check if using Google models for better prompt formatting
-    const isGoogleModel = GOOGLE_MODELS.some((m) =>
-      DEFAULT_HAIRSTYLE_MODEL.includes(m.replace("fal-ai/", ""))
+    // Check if model uses singular image_url
+    const usesSingularImageUrl = MODELS_USING_SINGULAR_IMAGE_URL.some(
+      (keyword) =>
+        DEFAULT_HAIRSTYLE_MODEL.toLowerCase().includes(keyword.toLowerCase())
+    );
+    const usesImageUrlsArray = !usesSingularImageUrl;
+
+    // Check if model uses @Image1 reference syntax (Kling models)
+    const usesImageReferenceSyntax = MODELS_USING_IMAGE_REFERENCE_SYNTAX.some(
+      (keyword) =>
+        DEFAULT_HAIRSTYLE_MODEL.toLowerCase().includes(keyword.toLowerCase())
     );
 
-    // Create prompt based on model type
-    // Google models work better with direct editing instructions
-    const prompt = isGoogleModel
-      ? `Change this ${gender} person's hairstyle to a "${styleDescription}" hairstyle. Keep the exact same face, skin tone, and facial features. Only modify the hair. Professional salon-quality result.`
-      : `A professional portrait photo of a ${gender} person with a beautiful "${styleDescription}" hairstyle. 
-The person has the exact same face, skin tone, and facial features. 
-High quality, photorealistic, natural lighting, salon-quality hair styling.
-Keep the background simple and professional.`;
+    console.log("Model:", DEFAULT_HAIRSTYLE_MODEL);
+    console.log("Uses image_urls array:", usesImageUrlsArray);
+    console.log("Uses @Image reference syntax:", usesImageReferenceSyntax);
+
+    // Build prompt - Kling models need @Image1 syntax to reference input images
+    let prompt = styleDescription;
+    if (usesImageReferenceSyntax) {
+      // For Kling: "@Image1 with [hairstyle description]"
+      if (referenceImageUrl) {
+        // With reference image: apply ref style to user's photo
+        prompt = `Apply the hairstyle from @Image2 to the person in @Image1. ${styleDescription}`;
+      } else {
+        // Without reference: just modify @Image1
+        prompt = `@Image1 with ${styleDescription}`;
+      }
+    }
 
     console.log("Prompt:", prompt);
     console.log("Sending request to Fal AI...");
+    console.log("Base64 image length:", base64Image?.length || 0);
+
+    // Validate base64 image
+    if (!base64Image || base64Image.length < 100) {
+      throw new Error("Invalid or missing base64 image data");
+    }
 
     // Convert base64 to data URL if needed
     const imageUrl = base64Image.startsWith("data:")
       ? base64Image
       : `data:image/jpeg;base64,${base64Image}`;
 
+    // Build image_urls array - include reference image if provided
+    const imageUrls = referenceImageUrl
+      ? [imageUrl, referenceImageUrl]
+      : [imageUrl];
+
+    console.log("Image URL length:", imageUrl.length);
+    console.log("Image URLs array length:", imageUrls.length);
+
     // Build input based on model type
-    const input = isGoogleModel
+    const input = usesImageUrlsArray
       ? {
-          // Google models (Nano Banana Pro / Gemini 3 Pro) use image_urls array
-          image_urls: [imageUrl],
+          // Models using image_urls array (Google, edit models, etc.)
+          image_urls: imageUrls,
           prompt: prompt,
           num_images: 1,
           output_format: "jpeg",
@@ -104,21 +146,24 @@ Keep the background simple and professional.`;
           // FLUX models use image_url (singular)
           image_url: imageUrl,
           prompt: prompt,
-          strength: 0.65,
-          num_inference_steps: 28,
-          guidance_scale: 3.5,
+          strength: 0.55, // Lower strength to preserve face better
+          num_inference_steps: 30,
+          guidance_scale: 4.0,
           num_images: 1,
           enable_safety_checker: true,
           output_format: "jpeg",
           sync_mode: true,
         };
 
-    console.log("Using Google model format:", isGoogleModel);
+    console.log(
+      "Input format:",
+      usesImageUrlsArray ? "image_urls array" : "image_url singular"
+    );
 
     // Use image-to-image model
     const result = (await fal.subscribe(DEFAULT_HAIRSTYLE_MODEL, {
       input: input,
-      logs: false, // Disable verbose logging to prevent base64 chunks in terminal
+      logs: false,
       onQueueUpdate: (update) => {
         if (update.status === "IN_PROGRESS") {
           console.log("Generation in progress...");
@@ -127,10 +172,6 @@ Keep the background simple and professional.`;
     })) as { data: FalImageResult };
 
     console.log("=== FAL AI RESPONSE RECEIVED ===");
-    console.log(
-      "Response data:",
-      JSON.stringify(result.data, null, 2).substring(0, 1000)
-    );
 
     // Extract image URL from response
     if (result.data?.images && result.data.images.length > 0) {
@@ -151,100 +192,6 @@ Keep the background simple and professional.`;
     throw new Error(
       error?.message || "Failed to generate hairstyle with Fal AI"
     );
-  }
-};
-
-/**
- * Generate an image from text prompt only (no input image)
- */
-export const generateImageFromPrompt = async (
-  prompt: string,
-  options?: {
-    model?: string;
-    width?: number;
-    height?: number;
-    numImages?: number;
-  }
-): Promise<string[]> => {
-  try {
-    const model = options?.model || IMAGE_MODELS.FLUX_SCHNELL;
-
-    console.log("=== STARTING FAL AI TEXT-TO-IMAGE ===");
-    console.log("Using model:", model);
-    console.log("Prompt:", prompt);
-
-    const result = (await fal.subscribe(model, {
-      input: {
-        prompt: prompt,
-        image_size: {
-          width: options?.width || 1024,
-          height: options?.height || 1024,
-        },
-        num_images: options?.numImages || 1,
-        enable_safety_checker: true,
-        output_format: "jpeg",
-        sync_mode: true,
-      },
-      logs: false,
-    })) as { data: FalImageResult };
-
-    console.log("=== FAL AI TEXT-TO-IMAGE RESPONSE ===");
-
-    if (result.data?.images && result.data.images.length > 0) {
-      return result.data.images.map((img) => img.url);
-    }
-
-    throw new Error("No images were generated");
-  } catch (error: any) {
-    console.error("=== FAL AI TEXT-TO-IMAGE ERROR ===");
-    console.error("Error:", error?.message || error);
-    throw error;
-  }
-};
-
-/**
- * Generate video from image (future feature)
- */
-export const generateVideoFromImage = async (
-  base64Image: string,
-  prompt: string
-): Promise<string> => {
-  try {
-    console.log("=== STARTING FAL AI VIDEO GENERATION ===");
-
-    const imageUrl = base64Image.startsWith("data:")
-      ? base64Image
-      : `data:image/jpeg;base64,${base64Image}`;
-
-    // Using Kling for image-to-video
-    const result = (await fal.subscribe(
-      "fal-ai/kling-video/v1/standard/image-to-video",
-      {
-        input: {
-          prompt: prompt,
-          image_url: imageUrl,
-          duration: "5",
-        },
-        logs: false,
-        onQueueUpdate: (update) => {
-          if (update.status === "IN_PROGRESS") {
-            console.log("Video generation in progress...");
-          }
-        },
-      }
-    )) as { data: { video: { url: string } } };
-
-    console.log("=== FAL AI VIDEO RESPONSE ===");
-
-    if (result.data?.video?.url) {
-      return result.data.video.url;
-    }
-
-    throw new Error("No video was generated");
-  } catch (error: any) {
-    console.error("=== FAL AI VIDEO GENERATION ERROR ===");
-    console.error("Error:", error?.message || error);
-    throw error;
   }
 };
 

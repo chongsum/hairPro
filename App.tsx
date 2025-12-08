@@ -14,58 +14,44 @@ import {
   Easing,
   Dimensions,
   ActivityIndicator,
+  FlatList,
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
-import * as FileSystem from "expo-file-system";
-// Asset import removed - using Image.resolveAssetSource instead
+import * as ImageManipulator from "expo-image-manipulator";
+import * as FileSystem from "expo-file-system/legacy";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { generateHairstyle } from "./src/services/falai";
-import {
-  analyzeHair,
-  assessFeasibility,
-  HairAnalysis,
-  FeasibilityAssessment,
-} from "./src/services/openrouter";
+import { analyzeHair, HairAnalysis } from "./src/services/openrouter";
+import axios from "axios";
 
 // Demo image for development
 const DEMO_FRONT_IMAGE = require("./assets/demo_front.jpg");
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
-// Screen types for navigation
+// Screen types for navigation - simplified flow
 type Screen =
-  | "welcome"
-  | "photoMethod"
-  | "cameraCapture"
-  | "uploadGuide"
-  | "photoConfirm"
-  | "analyzing"
-  | "analysisResult"
-  | "gender"
-  | "styleSelect"
-  | "lengthSelect"
-  | "colorSelect"
-  | "feasibility"
-  | "generating"
-  | "result";
+  | "initial" // Combined gender + flow choice
+  | "photoCapture" // Take/upload photo
+  | "photoConfirm" // Preview and confirm photo
+  | "styleSelect" // Path A: Style selection with color picker
+  | "refUpload" // Path B: Ref image upload with color picker
+  | "generating" // Generating preview
+  | "result"; // Final result comparison
 
 type Gender = "male" | "female";
+type FlowType = "ref" | "style";
 
-// Hair length options
-const HAIR_LENGTHS = [
-  { id: "buzz", label: "Buzz Cut", description: "< 1 inch" },
-  { id: "short", label: "Short", description: "1-3 inches" },
-  { id: "medium", label: "Medium", description: "3-6 inches" },
-  {
-    id: "shoulderLength",
-    label: "Shoulder Length",
-    description: "6-12 inches",
-  },
-  { id: "long", label: "Long", description: "12-18 inches" },
-  { id: "veryLong", label: "Very Long", description: "18+ inches" },
+// Hair length options with filter categories
+const HAIR_LENGTH_FILTERS = [
+  { id: "all", label: "All" },
+  { id: "buzz", label: "Buzz" },
+  { id: "short", label: "Short" },
+  { id: "medium", label: "Medium" },
+  { id: "shoulder", label: "Shoulder" },
+  { id: "long", label: "Long" },
 ];
 
-// Hairstyle presets
 // Hairstyles categorized by length and gender
 const HAIRSTYLES_BY_LENGTH = {
   male: {
@@ -96,14 +82,15 @@ const HAIRSTYLES_BY_LENGTH = {
       "Curtain Hair",
       "Messy Textured",
     ],
-    shoulderLength: [
-      "Flow Hairstyle",
-      "Surfer Hair",
-      "Layered Shag",
-      "Bro Flow",
+    shoulder: ["Flow Hairstyle", "Surfer Hair", "Layered Shag", "Bro Flow"],
+    long: [
+      "Man Bun",
+      "Long Layers",
+      "Samurai Top Knot",
+      "Viking Style",
+      "Classic Long",
+      "Bohemian Waves",
     ],
-    long: ["Man Bun", "Long Layers", "Samurai Top Knot", "Viking Style"],
-    veryLong: ["Classic Long", "Long with Layers", "Bohemian Waves"],
   },
   female: {
     buzz: ["Buzz Cut", "Pixie Buzz", "Tapered Buzz"],
@@ -127,7 +114,7 @@ const HAIRSTYLES_BY_LENGTH = {
       "Wavy Bob",
       "Curtain Bangs Bob",
     ],
-    shoulderLength: [
+    shoulder: [
       "Lob (Long Bob)",
       "Shoulder-Length Layers",
       "Shag Cut",
@@ -145,384 +132,298 @@ const HAIRSTYLES_BY_LENGTH = {
       "V-Cut Layers",
       "U-Cut Layers",
       "Feathered Layers",
-      "Curtain Bangs Long",
-    ],
-    veryLong: [
-      "Classic Long Layers",
       "Mermaid Waves",
       "Bohemian Long",
-      "Sleek Straight",
       "Rapunzel Layers",
     ],
   },
 };
 
-// Natural hair colors only (no fantasy colors)
+// Natural hair colors
 const HAIR_COLORS = [
-  { id: "natural", name: "Keep Natural", color: null },
+  { id: "natural", name: "Natural", color: null },
   { id: "jetBlack", name: "Jet Black", color: "#0a0a0a" },
-  { id: "naturalBlack", name: "Natural Black", color: "#1a1a1a" },
+  { id: "naturalBlack", name: "Black", color: "#1a1a1a" },
   { id: "darkBrown", name: "Dark Brown", color: "#3d2314" },
   { id: "chocolateBrown", name: "Chocolate", color: "#4a3728" },
   { id: "chestnut", name: "Chestnut", color: "#954535" },
   { id: "auburn", name: "Auburn", color: "#922724" },
-  { id: "mediumBrown", name: "Medium Brown", color: "#6b4423" },
+  { id: "mediumBrown", name: "Med Brown", color: "#6b4423" },
   { id: "lightBrown", name: "Light Brown", color: "#8b5a2b" },
   { id: "caramel", name: "Caramel", color: "#a67b5b" },
-  { id: "honeyBlonde", name: "Honey Blonde", color: "#c9a86c" },
-  { id: "goldenBlonde", name: "Golden Blonde", color: "#d4a574" },
-  { id: "ashBlonde", name: "Ash Blonde", color: "#c2b280" },
+  { id: "honeyBlonde", name: "Honey", color: "#c9a86c" },
+  { id: "goldenBlonde", name: "Golden", color: "#d4a574" },
+  { id: "ashBlonde", name: "Ash", color: "#c2b280" },
   { id: "platinumBlonde", name: "Platinum", color: "#e8e4c9" },
   { id: "strawberryBlonde", name: "Strawberry", color: "#cc7a5f" },
   { id: "ginger", name: "Ginger", color: "#b55239" },
   { id: "copper", name: "Copper", color: "#b87333" },
-  { id: "silver", name: "Silver/Gray", color: "#a8a8a8" },
+  { id: "silver", name: "Silver", color: "#a8a8a8" },
 ];
 
-// SVG-style icon components using View/Text
-const FrontFaceIcon = () => (
-  <View style={iconStyles.faceContainer}>
-    <View style={iconStyles.faceOutline}>
-      <Text style={iconStyles.faceEmoji}>👤</Text>
-    </View>
-    <View style={iconStyles.arrowDown}>
-      <Text style={iconStyles.arrowText}>↓</Text>
-    </View>
-  </View>
-);
+// OpenRouter API for vision analysis of reference image
+const OPENROUTER_API_KEY = process.env.EXPO_PUBLIC_OPENROUTER_API_KEY;
+const VISION_MODEL =
+  process.env.EXPO_PUBLIC_AI_VISION_MODEL || "anthropic/claude-sonnet-4";
 
-const SideFaceIcon = () => (
-  <View style={iconStyles.sideIconContainer}>
-    <View style={iconStyles.faceOutline}>
-      <Text style={iconStyles.faceEmoji}>👤</Text>
-    </View>
-    <View style={iconStyles.angleIndicator}>
-      <Text style={iconStyles.angleText}>45°</Text>
-    </View>
-  </View>
-);
+const openRouterApi = axios.create({
+  baseURL: "https://openrouter.ai/api/v1",
+  headers: {
+    Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+    "Content-Type": "application/json",
+    "HTTP-Referer": "https://hairpro.app",
+    "X-Title": "HairPro",
+  },
+});
 
-const CameraIcon = () => <Text style={{ fontSize: 48 }}>📷</Text>;
+/**
+ * Analyze reference image to describe hairstyle
+ */
+const analyzeRefImageHairstyle = async (
+  imageBase64OrUrl: string
+): Promise<string> => {
+  const prompt = `Analyze this hairstyle image in detail for hair styling purposes.
 
-const GalleryIcon = () => <Text style={{ fontSize: 48 }}>🖼️</Text>;
+Describe the hairstyle with specific details including:
+- Hair length and layers
+- Texture and volume
+- Bangs/fringe style if any
+- Parting and overall shape
+- Any special styling techniques visible
 
-const CheckIcon = () => <Text style={{ fontSize: 24 }}>✓</Text>;
+Provide a concise but detailed description (2-3 sentences) that could be used as a prompt to recreate this hairstyle. Focus only on the hair, not the person's face or other features.`;
 
-// Face overlay guide component for camera
-const FaceOverlayGuide = ({ step }: { step: "front" | "side" }) => {
-  const pulseAnim = useRef(new Animated.Value(1)).current;
+  const imageContent =
+    imageBase64OrUrl.startsWith("data:") || imageBase64OrUrl.startsWith("http")
+      ? imageBase64OrUrl
+      : `data:image/jpeg;base64,${imageBase64OrUrl}`;
 
-  useEffect(() => {
-    const pulse = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulseAnim, {
-          toValue: 1.05,
-          duration: 1000,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
-        }),
-        Animated.timing(pulseAnim, {
-          toValue: 1,
-          duration: 1000,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
-        }),
-      ])
-    );
-    pulse.start();
-    return () => pulse.stop();
-  }, []);
+  const response = await openRouterApi.post("/chat/completions", {
+    model: VISION_MODEL,
+    messages: [
+      {
+        role: "user",
+        content: [
+          {
+            type: "image_url",
+            image_url: { url: imageContent },
+          },
+          {
+            type: "text",
+            text: prompt,
+          },
+        ],
+      },
+    ],
+    max_tokens: 512,
+    temperature: 0.3,
+  });
 
   return (
-    <View style={overlayStyles.container}>
-      {/* Darkened corners */}
-      <View style={overlayStyles.darkOverlay}>
-        <Animated.View
-          style={[
-            overlayStyles.faceGuide,
-            step === "side" && overlayStyles.faceGuideSide,
-            { transform: [{ scale: pulseAnim }] },
-          ]}
-        >
-          {/* Face oval guide */}
-          <View style={overlayStyles.faceOval}>
-            {step === "front" ? (
-              <>
-                <View style={overlayStyles.eyeLine} />
-                <View style={overlayStyles.noseLine} />
-                <View style={overlayStyles.centerLine} />
-              </>
-            ) : (
-              <>
-                <View style={overlayStyles.sideProfile} />
-                <View style={[overlayStyles.angleArrow, { left: -60 }]}>
-                  <Text style={overlayStyles.angleText}>45°</Text>
-                </View>
-              </>
-            )}
-          </View>
-        </Animated.View>
-      </View>
-
-      {/* Instructions */}
-      <View style={overlayStyles.instructionBox}>
-        <Text style={overlayStyles.instructionTitle}>
-          {step === "front" ? "📸 Front View" : "📸 45° Side View"}
-        </Text>
-        <Text style={overlayStyles.instructionText}>
-          {step === "front"
-            ? "Position your face within the oval guide.\nLook directly at the camera."
-            : "Turn your head slightly to show your profile.\nKeep your hairline visible."}
-        </Text>
-      </View>
-    </View>
+    response.data.choices[0]?.message?.content || "Unable to analyze hairstyle"
   );
 };
 
-// Score bar component
-const ScoreBar = ({
-  label,
-  score,
-  maxScore = 100,
-  color = "#6c5ce7",
-}: {
-  label: string;
-  score: number;
-  maxScore?: number;
-  color?: string;
-}) => {
-  const percentage = (score / maxScore) * 100;
-  const animWidth = useRef(new Animated.Value(0)).current;
+/**
+ * Resize and compress image to ~1024px max dimension and reduce quality
+ */
+const resizeAndCompressImage = async (
+  uri: string
+): Promise<{ uri: string; base64: string }> => {
+  try {
+    console.log("Resizing and compressing image...");
 
-  useEffect(() => {
-    Animated.timing(animWidth, {
-      toValue: percentage,
-      duration: 800,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: false,
-    }).start();
-  }, [percentage]);
+    // Resize to max 1024px on longest side and compress to 30% quality
+    const manipulated = await ImageManipulator.manipulateAsync(
+      uri,
+      [{ resize: { width: 1024 } }], // Resize width to 1024, height auto-scales
+      {
+        compress: 0.3, // 30% quality for smaller file size
+        format: ImageManipulator.SaveFormat.JPEG,
+        base64: true,
+      }
+    );
 
-  return (
-    <View style={scoreStyles.container}>
-      <View style={scoreStyles.labelRow}>
-        <Text style={scoreStyles.label}>{label}</Text>
-        <Text style={scoreStyles.value}>
-          {score}/{maxScore}
-        </Text>
-      </View>
-      <View style={scoreStyles.barBackground}>
-        <Animated.View
-          style={[
-            scoreStyles.barFill,
-            {
-              backgroundColor: color,
-              width: animWidth.interpolate({
-                inputRange: [0, 100],
-                outputRange: ["0%", "100%"],
-              }),
-            },
-          ]}
-        />
-      </View>
-    </View>
-  );
+    const base64 = manipulated.base64 || "";
+    console.log(
+      `Compressed image: ${Math.round((base64.length * 0.75) / 1024)}KB`
+    );
+
+    return { uri: manipulated.uri, base64 };
+  } catch (error) {
+    console.error("Image compression error:", error);
+    // Fallback: return original with empty base64 (will fail gracefully)
+    return { uri, base64: "" };
+  }
 };
 
 // Main App Component
 export default function App() {
   // Navigation state
-  const [screen, setScreen] = useState<Screen>("welcome");
+  const [screen, setScreen] = useState<Screen>("initial");
+  const [flowType, setFlowType] = useState<FlowType>("style");
 
-  // Image state (single front-facing photo)
-  const [frontImage, setFrontImage] = useState<{
+  // User preferences
+  const [gender, setGender] = useState<Gender>("female");
+
+  // Image state
+  const [userPhoto, setUserPhoto] = useState<{
     uri: string;
     base64: string;
   } | null>(null);
 
+  // Reference image state (for ref flow)
+  const [refImage, setRefImage] = useState<{
+    uri: string;
+    base64?: string;
+  } | null>(null);
+  const [refImageDescription, setRefImageDescription] = useState<string>("");
+  const [isAnalyzingRef, setIsAnalyzingRef] = useState(false);
+
   // Analysis states
-  const [gender, setGender] = useState<Gender>("female");
   const [hairAnalysis, setHairAnalysis] = useState<HairAnalysis | null>(null);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [analysisError, setAnalysisError] = useState<string | null>(null);
 
   // Style selection states
   const [selectedStyle, setSelectedStyle] = useState<string>("");
-  const [customStyleUrl, setCustomStyleUrl] = useState<string>("");
-  const [selectedLength, setSelectedLength] = useState<string>("");
   const [selectedColor, setSelectedColor] = useState<string>("natural");
-
-  // Feasibility states
-  const [feasibility, setFeasibility] = useState<FeasibilityAssessment | null>(
-    null
-  );
-  const [isAssessing, setIsAssessing] = useState(false);
+  const [selectedLengthFilter, setSelectedLengthFilter] =
+    useState<string>("all");
 
   // Generation states
   const [isGenerating, setIsGenerating] = useState(false);
-  const [generatedImages, setGeneratedImages] = useState<string[]>([]);
+  const [generatedImage, setGeneratedImage] = useState<string | null>(null);
   const [generationProgress, setGenerationProgress] = useState(0);
+  const [generationStep, setGenerationStep] = useState<string>("");
 
   // Camera refs
   const cameraRef = useRef<CameraView>(null);
   const [permission, requestPermission] = useCameraPermissions();
+  const [showCamera, setShowCamera] = useState(false);
 
   // Animation refs
   const fadeAnim = useRef(new Animated.Value(0)).current;
+  const colorScrollRef = useRef<FlatList>(null);
 
   useEffect(() => {
     Animated.timing(fadeAnim, {
       toValue: 1,
-      duration: 500,
+      duration: 400,
       useNativeDriver: true,
     }).start();
   }, [screen]);
 
-  // Start hair analysis in BACKGROUND - user can continue selecting options
-  const startHairAnalysisBackground = useCallback(async () => {
-    if (!frontImage?.base64) return;
-    if (isAnalyzing || hairAnalysis) return; // Already running or completed
-
-    setIsAnalyzing(true);
-    setAnalysisError(null);
-
-    try {
-      // Using front image only for analysis
-      const analysis = await analyzeHair(
-        frontImage.base64,
-        frontImage.base64, // Pass same image for compatibility
-        gender
-      );
-      setHairAnalysis(analysis);
-    } catch (error: any) {
-      setAnalysisError(error.message || "Failed to analyze hair");
-      console.error("Background hair analysis failed:", error);
-    } finally {
-      setIsAnalyzing(false);
+  // Get filtered hairstyles
+  const getFilteredHairstyles = useCallback(() => {
+    const allStyles = HAIRSTYLES_BY_LENGTH[gender];
+    if (selectedLengthFilter === "all") {
+      // Return all hairstyles flattened
+      return Object.values(allStyles).flat();
     }
-  }, [frontImage, gender, isAnalyzing, hairAnalysis]);
-
-  // Start analysis automatically when photo is confirmed
-  useEffect(() => {
-    if (screen === "gender" && frontImage && !hairAnalysis && !isAnalyzing) {
-      startHairAnalysisBackground();
-    }
-  }, [
-    screen,
-    frontImage,
-    hairAnalysis,
-    isAnalyzing,
-    startHairAnalysisBackground,
-  ]);
-
-  // Run feasibility assessment
-  const runFeasibilityAssessment = useCallback(async () => {
-    if (!hairAnalysis) {
-      Alert.alert("Please wait", "Hair analysis is still in progress.");
-      return;
-    }
-
-    setIsAssessing(true);
-    setScreen("feasibility");
-
-    try {
-      const colorName =
-        HAIR_COLORS.find((c) => c.id === selectedColor)?.name || "Natural";
-      const assessment = await assessFeasibility(
-        hairAnalysis,
-        selectedStyle || "Natural style",
-        selectedLength,
-        colorName,
-        gender
-      );
-      setFeasibility(assessment);
-    } catch (error: any) {
-      Alert.alert(
-        "Assessment Error",
-        "Could not complete feasibility assessment. Please try again."
-      );
-    } finally {
-      setIsAssessing(false);
-    }
-  }, [hairAnalysis, selectedStyle, selectedLength, selectedColor, gender]);
+    return allStyles[selectedLengthFilter as keyof typeof allStyles] || [];
+  }, [gender, selectedLengthFilter]);
 
   // Generate hairstyle images
   const generateImages = useCallback(async () => {
-    if (!frontImage?.base64) return;
+    if (!userPhoto?.base64) return;
 
     setIsGenerating(true);
     setGenerationProgress(0);
+    setGenerationStep("Preparing your photo...");
     setScreen("generating");
 
-    // Build enhanced prompt with analysis and feasibility data
-    const colorName =
-      HAIR_COLORS.find((c) => c.id === selectedColor)?.name || "";
-    const lengthLabel =
-      HAIR_LENGTHS.find((l) => l.id === selectedLength)?.label ||
-      selectedLength;
-
-    // Build comprehensive style description using analysis data
-    let styleDescription = `${selectedStyle} hairstyle, ${lengthLabel} length`;
-
-    if (colorName && colorName !== "Keep Natural") {
-      styleDescription += `, ${colorName} hair color`;
-    }
-
-    // Add hair analysis context for more realistic generation
-    if (hairAnalysis) {
-      styleDescription += `. Current hair: ${hairAnalysis.hairTexture.value} texture, ${hairAnalysis.hairDensity.value} density`;
-      if (hairAnalysis.faceShape.value) {
-        styleDescription += `, ${hairAnalysis.faceShape.value} face shape`;
-      }
-    }
-
-    // Add feasibility guidance for realistic results
-    if (feasibility) {
-      if (feasibility.textureCompatibility.stylingRequired) {
-        styleDescription += `. Style with ${feasibility.textureCompatibility.stylingRequired}`;
-      }
-      if (feasibility.professionalNotes) {
-        styleDescription += `. ${feasibility.professionalNotes}`;
-      }
-    }
-
-    console.log("Enhanced generation prompt:", styleDescription);
-
     try {
-      // Generate single image from front photo
-      const progressInterval = setInterval(() => {
-        setGenerationProgress((prev) => Math.min(prev + 3, 90));
-      }, 400);
+      // Step 1: Analyze hair (0-30%)
+      setGenerationStep("Analyzing your hair characteristics...");
 
-      setGenerationProgress(10);
+      // Progress animation for analysis phase
+      const progressInterval1 = setInterval(() => {
+        setGenerationProgress((prev) => Math.min(prev + 1, 30));
+      }, 600);
+
+      let analysis: HairAnalysis | null = null;
+      try {
+        analysis = await analyzeHair(
+          userPhoto.base64,
+          userPhoto.base64,
+          gender
+        );
+        setHairAnalysis(analysis);
+      } catch (err) {
+        console.error("Hair analysis failed:", err);
+      }
+
+      clearInterval(progressInterval1);
+      setGenerationProgress(30);
+
+      // Step 2: Build prompt and generate (30-95%)
+      setGenerationStep("Creating your new hairstyle...");
+
+      // Build prompt based on flow type
+      let styleDescription = "";
+
+      if (flowType === "ref" && refImageDescription) {
+        // Reference image flow - use the analyzed description
+        styleDescription = refImageDescription;
+      } else {
+        // Style selection flow
+        styleDescription = `${selectedStyle} hairstyle`;
+      }
+
+      // Add color if not natural
+      const colorName =
+        HAIR_COLORS.find((c) => c.id === selectedColor)?.name || "";
+      if (colorName && colorName !== "Natural") {
+        styleDescription += `, ${colorName} hair color`;
+      }
+
+      // Add hair analysis context for more realistic generation
+      if (analysis) {
+        styleDescription += `. Current hair: ${analysis.hairTexture.value} texture, ${analysis.hairDensity.value} density`;
+        if (analysis.faceShape.value) {
+          styleDescription += `, ${analysis.faceShape.value} face shape`;
+        }
+      }
+
+      console.log("Generation prompt:", styleDescription);
+
+      // Progress animation for generation phase
+      const progressInterval2 = setInterval(() => {
+        setGenerationProgress((prev) => Math.min(prev + 1, 95));
+      }, 700);
 
       const result = await generateHairstyle(
-        frontImage.base64,
+        userPhoto.base64,
         styleDescription,
-        gender
+        gender,
+        flowType === "ref" && refImage?.uri ? refImage.uri : undefined
       );
 
-      clearInterval(progressInterval);
+      clearInterval(progressInterval2);
       setGenerationProgress(100);
-      setGeneratedImages([result]);
-      setScreen("result");
+      setGenerationStep("Complete!");
+      setGeneratedImage(result);
+
+      // Small delay before showing result
+      setTimeout(() => {
+        setScreen("result");
+      }, 500);
     } catch (error: any) {
       Alert.alert(
         "Generation Error",
-        error.message || "Failed to generate hairstyle images"
+        error.message || "Failed to generate hairstyle image"
       );
-      setScreen("feasibility");
+      setScreen(flowType === "style" ? "styleSelect" : "refUpload");
     } finally {
       setIsGenerating(false);
     }
   }, [
-    frontImage,
+    userPhoto,
     selectedStyle,
-    selectedLength,
     selectedColor,
     gender,
-    hairAnalysis,
-    feasibility,
+    flowType,
+    refImage,
+    refImageDescription,
   ]);
 
   // Camera capture function
@@ -531,15 +432,16 @@ export default function App() {
 
     try {
       const photo = await cameraRef.current.takePictureAsync({
-        base64: true,
-        quality: 0.8,
+        quality: 0.8, // Capture at reasonable quality, we'll compress after
       });
 
       if (photo) {
-        setFrontImage({
-          uri: photo.uri,
-          base64: photo.base64 || "",
-        });
+        // Resize and compress the image
+        const compressed = await resizeAndCompressImage(photo.uri);
+        setUserPhoto(compressed);
+        setShowCamera(false);
+
+        // Navigate to photo confirmation screen
         setScreen("photoConfirm");
       }
     } catch (error) {
@@ -550,10 +452,10 @@ export default function App() {
   // Pick image from gallery
   const pickImage = async () => {
     try {
-      const permission =
+      const permissionResult =
         await ImagePicker.requestMediaLibraryPermissionsAsync();
 
-      if (!permission.granted) {
+      if (!permissionResult.granted) {
         Alert.alert(
           "Permission needed",
           "Please allow access to your photo library"
@@ -564,332 +466,368 @@ export default function App() {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ["images"],
         allowsEditing: false,
-        quality: 0.8,
-        base64: true,
+        quality: 1, // Full quality, we'll compress after
       });
 
       if (!result.canceled && result.assets[0]) {
         const asset = result.assets[0];
-        const imageData = {
-          uri: asset.uri,
-          base64: asset.base64 || "",
-        };
 
-        if (!imageData.base64) {
-          const base64 = await FileSystem.readAsStringAsync(asset.uri, {
-            encoding: "base64",
-          });
-          imageData.base64 = base64;
-        }
+        // Resize and compress the image
+        const compressed = await resizeAndCompressImage(asset.uri);
+        setUserPhoto(compressed);
 
-        setFrontImage(imageData);
+        // Navigate to photo confirmation screen
+        setScreen("photoConfirm");
       }
     } catch (error: any) {
       Alert.alert("Error", error.message || "Failed to pick image");
     }
   };
 
+  // Pick reference image
+  const pickRefImage = async () => {
+    try {
+      const permissionResult =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+      if (!permissionResult.granted) {
+        Alert.alert(
+          "Permission needed",
+          "Please allow access to your photo library"
+        );
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        allowsEditing: false,
+        quality: 1, // Full quality, we'll compress after
+      });
+
+      if (!result.canceled && result.assets[0]) {
+        const asset = result.assets[0];
+
+        // Resize and compress the reference image
+        const compressed = await resizeAndCompressImage(asset.uri);
+        setRefImage({
+          uri: compressed.uri,
+          base64: compressed.base64,
+        });
+
+        // Analyze the reference image
+        analyzeRefImage(compressed.base64);
+      }
+    } catch (error: any) {
+      Alert.alert("Error", error.message || "Failed to pick reference image");
+    }
+  };
+
+  // Analyze reference image hairstyle
+  const analyzeRefImage = async (imageData: string) => {
+    setIsAnalyzingRef(true);
+    try {
+      const description = await analyzeRefImageHairstyle(imageData);
+      setRefImageDescription(description);
+    } catch (error) {
+      console.error("Failed to analyze reference image:", error);
+      setRefImageDescription("Unable to analyze hairstyle from image");
+    } finally {
+      setIsAnalyzingRef(false);
+    }
+  };
+
   // Reset app state
   const resetApp = () => {
-    setScreen("welcome");
-    setFrontImage(null);
+    setScreen("initial");
+    setFlowType("style");
+    setUserPhoto(null);
+    setRefImage(null);
+    setRefImageDescription("");
     setHairAnalysis(null);
-    setFeasibility(null);
     setSelectedStyle("");
-    setSelectedLength("");
     setSelectedColor("natural");
-    setGeneratedImages([]);
+    setSelectedLengthFilter("all");
+    setGeneratedImage(null);
     setGenerationProgress(0);
+    setShowCamera(false);
   };
 
   // Use demo photo for development/testing
-  const useDemoPhotos = async () => {
+  const useDemoPhoto = async () => {
     try {
-      // Helper function to load asset and convert to base64
-      const loadAssetAsBase64 = async (
-        assetModule: any
-      ): Promise<{ uri: string; base64: string }> => {
-        // Get the URI from resolveAssetSource
-        const resolved = Image.resolveAssetSource(assetModule);
-        const uri = resolved.uri;
+      const resolved = Image.resolveAssetSource(DEMO_FRONT_IMAGE);
+      const uri = resolved.uri;
 
-        // Fetch the image and convert to base64
-        const response = await fetch(uri);
-        const blob = await response.blob();
+      console.log("Loading demo photo from:", uri);
 
-        return new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => {
-            const dataUrl = reader.result as string;
-            const base64 = dataUrl.split(",")[1];
-            resolve({ uri, base64 });
-          };
-          reader.onerror = reject;
-          reader.readAsDataURL(blob);
-        });
-      };
+      // Fetch the image and convert to base64
+      const response = await fetch(uri);
+      const blob = await response.blob();
 
-      // Load demo front image only
-      const frontData = await loadAssetAsBase64(DEMO_FRONT_IMAGE);
-      setFrontImage(frontData);
+      // Convert blob to base64
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const dataUrl = reader.result as string;
+          const b64 = dataUrl.split(",")[1];
+          resolve(b64);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+
+      console.log(
+        `Demo photo loaded: ${Math.round((base64.length * 0.75) / 1024)}KB`
+      );
+
+      // Use directly without compression (demo only)
+      setUserPhoto({ uri, base64 });
       setScreen("photoConfirm");
     } catch (error) {
-      console.error("Error loading demo photos:", error);
-      Alert.alert(
-        "Error",
-        "Failed to load demo photos. Please try uploading manually."
-      );
+      console.error("Error loading demo photo:", error);
+      Alert.alert("Error", "Failed to load demo photo.");
     }
   };
 
   // ============ SCREENS ============
 
-  // WELCOME SCREEN
-  if (screen === "welcome") {
+  // INITIAL SCREEN - Combined Gender + Flow Choice
+  if (screen === "initial") {
     return (
       <SafeAreaView style={styles.container}>
         <StatusBar style="light" />
-        <View style={styles.welcomeContent}>
-          <Text style={styles.welcomeLogo}>✂️</Text>
-          <Text style={styles.welcomeTitle}>HairPro</Text>
-          <Text style={styles.welcomeSubtitle}>
-            Professional Hairstyle Visualization
-          </Text>
+        <ScrollView contentContainerStyle={styles.initialContent}>
+          {/* Logo */}
+          <View style={styles.logoSection}>
+            <Text style={styles.logoEmoji}>✂️</Text>
+            <Text style={styles.logoTitle}>HairPro</Text>
+            <Text style={styles.logoSubtitle}>AI Hairstyle Preview</Text>
+          </View>
 
-          <View style={styles.welcomeFeatures}>
-            <View style={styles.featureItem}>
-              <Text style={styles.featureIcon}>📸</Text>
-              <Text style={styles.featureText}>AI-Powered Analysis</Text>
-            </View>
-            <View style={styles.featureItem}>
-              <Text style={styles.featureIcon}>🎯</Text>
-              <Text style={styles.featureText}>Realistic Preview</Text>
-            </View>
-            <View style={styles.featureItem}>
-              <Text style={styles.featureIcon}>✅</Text>
-              <Text style={styles.featureText}>Feasibility Check</Text>
+          {/* Gender Selection */}
+          <View style={styles.selectionSection}>
+            <Text style={styles.sectionLabel}>I am</Text>
+            <View style={styles.genderRow}>
+              <TouchableOpacity
+                style={[
+                  styles.genderPill,
+                  gender === "female" && styles.genderPillActive,
+                ]}
+                onPress={() => setGender("female")}
+              >
+                <Text style={styles.genderEmoji}>👩</Text>
+                <Text
+                  style={[
+                    styles.genderText,
+                    gender === "female" && styles.genderTextActive,
+                  ]}
+                >
+                  Female
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.genderPill,
+                  gender === "male" && styles.genderPillActive,
+                ]}
+                onPress={() => setGender("male")}
+              >
+                <Text style={styles.genderEmoji}>👨</Text>
+                <Text
+                  style={[
+                    styles.genderText,
+                    gender === "male" && styles.genderTextActive,
+                  ]}
+                >
+                  Male
+                </Text>
+              </TouchableOpacity>
             </View>
           </View>
 
-          <TouchableOpacity
-            style={styles.startButton}
-            onPress={() => setScreen("photoMethod")}
-          >
-            <Text style={styles.startButtonText}>Get Started</Text>
-          </TouchableOpacity>
+          {/* Flow Type Selection */}
+          <View style={styles.selectionSection}>
+            <Text style={styles.sectionLabel}>I want to</Text>
 
-          <Text style={styles.welcomeNote}>
-            Help your clients visualize their new look before committing
-          </Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  // PHOTO METHOD SELECTION
-  if (screen === "photoMethod") {
-    return (
-      <SafeAreaView style={styles.container}>
-        <StatusBar style="light" />
-        <ScrollView contentContainerStyle={styles.scrollContent}>
-          <TouchableOpacity style={styles.backButton} onPress={resetApp}>
-            <Text style={styles.backText}>← Back</Text>
-          </TouchableOpacity>
-
-          <Text style={styles.screenTitle}>Capture Client Photo</Text>
-          <Text style={styles.screenSubtitle}>
-            Take a front-facing photo of the client
-          </Text>
-
-          <View style={styles.methodCards}>
-            {/* Camera Option */}
             <TouchableOpacity
-              style={styles.methodCard}
-              onPress={async () => {
-                if (!permission?.granted) {
-                  const result = await requestPermission();
-                  if (!result.granted) {
-                    Alert.alert(
-                      "Camera Access Required",
-                      "Please enable camera access to take photos"
-                    );
-                    return;
-                  }
-                }
-                setScreen("cameraCapture");
-              }}
+              style={[
+                styles.flowCard,
+                flowType === "style" && styles.flowCardActive,
+              ]}
+              onPress={() => setFlowType("style")}
             >
-              <CameraIcon />
-              <Text style={styles.methodTitle}>Take Photos</Text>
-              <Text style={styles.methodDesc}>
-                Use guided overlay for perfect positioning
-              </Text>
-              <View style={styles.methodBadge}>
-                <Text style={styles.methodBadgeText}>Recommended</Text>
+              <View style={styles.flowCardIcon}>
+                <Text style={styles.flowEmoji}>✨</Text>
               </View>
+              <View style={styles.flowCardContent}>
+                <Text style={styles.flowCardTitle}>Browse Styles</Text>
+                <Text style={styles.flowCardDesc}>
+                  Choose from our curated collection of hairstyles
+                </Text>
+              </View>
+              {flowType === "style" && (
+                <View style={styles.flowCardCheck}>
+                  <Text style={styles.checkMark}>✓</Text>
+                </View>
+              )}
             </TouchableOpacity>
 
-            {/* Upload Option */}
             <TouchableOpacity
-              style={[styles.methodCard, styles.methodCardSecondary]}
-              onPress={() => setScreen("uploadGuide")}
+              style={[
+                styles.flowCard,
+                flowType === "ref" && styles.flowCardActive,
+              ]}
+              onPress={() => setFlowType("ref")}
             >
-              <GalleryIcon />
-              <Text style={styles.methodTitle}>Upload Photos</Text>
-              <Text style={styles.methodDesc}>
-                Select existing photos from gallery
-              </Text>
+              <View style={styles.flowCardIcon}>
+                <Text style={styles.flowEmoji}>📷</Text>
+              </View>
+              <View style={styles.flowCardContent}>
+                <Text style={styles.flowCardTitle}>Use Reference Image</Text>
+                <Text style={styles.flowCardDesc}>
+                  Upload a photo of the hairstyle you want
+                </Text>
+              </View>
+              {flowType === "ref" && (
+                <View style={styles.flowCardCheck}>
+                  <Text style={styles.checkMark}>✓</Text>
+                </View>
+              )}
             </TouchableOpacity>
           </View>
 
-          {/* Photo Requirements */}
-          <View style={styles.requirementsBox}>
-            <Text style={styles.requirementsTitle}>📋 Photo Requirements</Text>
-            <View style={styles.requirementItem}>
-              <Text style={styles.requirementIcon}>💡</Text>
-              <Text style={styles.requirementText}>Good, even lighting</Text>
-            </View>
-            <View style={styles.requirementItem}>
-              <Text style={styles.requirementIcon}>👤</Text>
-              <Text style={styles.requirementText}>
-                Face & hairline clearly visible
-              </Text>
-            </View>
-            <View style={styles.requirementItem}>
-              <Text style={styles.requirementIcon}>🎯</Text>
-              <Text style={styles.requirementText}>Neutral background</Text>
-            </View>
-            <View style={styles.requirementItem}>
-              <Text style={styles.requirementIcon}>📐</Text>
-              <Text style={styles.requirementText}>
-                Natural head position, no accessories
-              </Text>
-            </View>
-          </View>
+          {/* Continue Button */}
+          <TouchableOpacity
+            style={styles.primaryButton}
+            onPress={() => setScreen("photoCapture")}
+          >
+            <Text style={styles.primaryButtonText}>Continue</Text>
+          </TouchableOpacity>
         </ScrollView>
       </SafeAreaView>
     );
   }
 
-  // CAMERA CAPTURE SCREEN
-  if (screen === "cameraCapture") {
-    if (!permission?.granted) {
+  // PHOTO CAPTURE SCREEN
+  if (screen === "photoCapture") {
+    if (showCamera) {
+      if (!permission?.granted) {
+        return (
+          <SafeAreaView style={styles.container}>
+            <StatusBar style="light" />
+            <View style={styles.centerContent}>
+              <Text style={styles.permissionText}>
+                Camera permission is required
+              </Text>
+              <TouchableOpacity
+                style={styles.primaryButton}
+                onPress={requestPermission}
+              >
+                <Text style={styles.primaryButtonText}>Grant Permission</Text>
+              </TouchableOpacity>
+            </View>
+          </SafeAreaView>
+        );
+      }
+
       return (
-        <SafeAreaView style={styles.container}>
-          <View style={styles.centerContent}>
-            <Text style={styles.permissionText}>
-              Camera permission is required
-            </Text>
-            <TouchableOpacity
-              style={styles.primaryButton}
-              onPress={requestPermission}
-            >
-              <Text style={styles.buttonText}>Grant Permission</Text>
-            </TouchableOpacity>
-          </View>
-        </SafeAreaView>
+        <View style={styles.cameraContainer}>
+          <StatusBar style="light" />
+          <CameraView ref={cameraRef} style={styles.camera} facing="front">
+            {/* Face guide overlay */}
+            <View style={styles.cameraOverlay}>
+              <View style={styles.faceGuide} />
+              <Text style={styles.cameraHint}>
+                Position your face in the circle
+              </Text>
+            </View>
+
+            {/* Controls */}
+            <View style={styles.cameraControls}>
+              <TouchableOpacity
+                style={styles.cameraBackBtn}
+                onPress={() => setShowCamera(false)}
+              >
+                <Text style={styles.cameraBackText}>✕</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.captureButton}
+                onPress={capturePhoto}
+              >
+                <View style={styles.captureButtonInner} />
+              </TouchableOpacity>
+
+              <View style={styles.cameraPlaceholder} />
+            </View>
+          </CameraView>
+        </View>
       );
     }
 
     return (
-      <View style={styles.cameraContainer}>
-        <StatusBar style="light" />
-        <CameraView ref={cameraRef} style={styles.camera} facing="front">
-          <FaceOverlayGuide step={"front"} />
-
-          {/* Controls */}
-          <View style={styles.cameraControls}>
-            <TouchableOpacity
-              style={styles.cameraBackButton}
-              onPress={() => setScreen("photoMethod")}
-            >
-              <Text style={styles.cameraBackText}>←</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.captureButton}
-              onPress={capturePhoto}
-            >
-              <View style={styles.captureButtonInner} />
-            </TouchableOpacity>
-
-            <View style={styles.cameraPlaceholder} />
-          </View>
-        </CameraView>
-      </View>
-    );
-  }
-
-  // UPLOAD GUIDE SCREEN
-  if (screen === "uploadGuide") {
-    return (
       <SafeAreaView style={styles.container}>
         <StatusBar style="light" />
-        <ScrollView contentContainerStyle={styles.scrollContent}>
+        <View style={styles.photoCaptureContent}>
           <TouchableOpacity
             style={styles.backButton}
-            onPress={() => setScreen("photoMethod")}
+            onPress={() => setScreen("initial")}
           >
             <Text style={styles.backText}>← Back</Text>
           </TouchableOpacity>
 
-          <Text style={styles.screenTitle}>Upload Photo</Text>
+          <Text style={styles.screenTitle}>Take Your Photo</Text>
           <Text style={styles.screenSubtitle}>
-            Select a front-facing photo from your gallery
+            We need a clear front-facing photo of you
           </Text>
 
-          {/* Photo Guide Card */}
-          <View style={styles.uploadGuideCards}>
-            <View style={styles.uploadGuideCard}>
-              <View style={styles.uploadGuideCardContent}>
-                <FrontFaceIcon />
-              </View>
-              <Text style={styles.uploadGuideTitle}>Front View Photo</Text>
-              <Text style={styles.uploadGuideDesc}>
-                • Face camera directly{"\n"}• Eyes level with camera{"\n"}• Full
-                forehead visible{"\n"}• Good lighting
-              </Text>
-              <View style={styles.uploadGuideCardContent}>
-                {frontImage ? (
-                  <View style={styles.uploadPreviewContainer}>
-                    <Image
-                      source={{ uri: frontImage.uri }}
-                      style={styles.uploadPreview}
-                    />
-                    <TouchableOpacity
-                      style={styles.changePhotoButton}
-                      onPress={pickImage}
-                    >
-                      <Text style={styles.changePhotoText}>Change</Text>
-                    </TouchableOpacity>
-                  </View>
-                ) : (
-                  <TouchableOpacity
-                    style={styles.uploadButton}
-                    onPress={pickImage}
-                  >
-                    <Text style={styles.uploadButtonText}>Select Photo</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-            </View>
+          {/* Photo Options */}
+          <View style={styles.photoOptions}>
+            <TouchableOpacity
+              style={styles.photoOptionCard}
+              onPress={async () => {
+                if (!permission?.granted) {
+                  const result = await requestPermission();
+                  if (!result.granted) {
+                    Alert.alert("Camera access required");
+                    return;
+                  }
+                }
+                setShowCamera(true);
+              }}
+            >
+              <Text style={styles.photoOptionIcon}>📸</Text>
+              <Text style={styles.photoOptionTitle}>Take Selfie</Text>
+              <Text style={styles.photoOptionDesc}>Use your camera</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.photoOptionCard}
+              onPress={pickImage}
+            >
+              <Text style={styles.photoOptionIcon}>🖼️</Text>
+              <Text style={styles.photoOptionTitle}>Upload Photo</Text>
+              <Text style={styles.photoOptionDesc}>From your gallery</Text>
+            </TouchableOpacity>
           </View>
 
-          {/* Continue Button */}
-          {frontImage && (
-            <TouchableOpacity
-              style={styles.continueButton}
-              onPress={() => setScreen("photoConfirm")}
-            >
-              <Text style={styles.continueButtonText}>Continue →</Text>
-            </TouchableOpacity>
-          )}
+          {/* Tips */}
+          <View style={styles.tipsBox}>
+            <Text style={styles.tipsTitle}>📋 For Best Results</Text>
+            <Text style={styles.tipItem}>• Good, even lighting</Text>
+            <Text style={styles.tipItem}>• Face the camera directly</Text>
+            <Text style={styles.tipItem}>
+              • Show your full face and hairline
+            </Text>
+            <Text style={styles.tipItem}>• Neutral background preferred</Text>
+          </View>
 
-          {/* Demo Button - Development Only */}
-          <TouchableOpacity style={styles.demoButton} onPress={useDemoPhotos}>
-            <Text style={styles.demoButtonText}>🧪 Use Demo Photos (Dev)</Text>
+          {/* Demo Button */}
+          <TouchableOpacity style={styles.demoButton} onPress={useDemoPhoto}>
+            <Text style={styles.demoButtonText}>🧪 Use Demo Photo (Dev)</Text>
           </TouchableOpacity>
-        </ScrollView>
+        </View>
       </SafeAreaView>
     );
   }
@@ -899,714 +837,362 @@ export default function App() {
     return (
       <SafeAreaView style={styles.container}>
         <StatusBar style="light" />
-        <ScrollView contentContainerStyle={styles.scrollContent}>
+        <View style={styles.photoConfirmContent}>
           <TouchableOpacity
             style={styles.backButton}
-            onPress={() => setScreen("photoMethod")}
+            onPress={() => {
+              setUserPhoto(null);
+              setScreen("photoCapture");
+            }}
           >
             <Text style={styles.backText}>← Back</Text>
           </TouchableOpacity>
 
-          <Text style={styles.screenTitle}>Confirm Photo</Text>
+          <Text style={styles.screenTitle}>Confirm Your Photo</Text>
           <Text style={styles.screenSubtitle}>
-            Review your photo before continuing
+            Make sure your face and hair are clearly visible
           </Text>
 
-          {/* Single Photo Display */}
-          <View style={styles.confirmPhotoContainer}>
-            <Text style={styles.confirmPhotoLabel}>📸 Front View</Text>
-            {frontImage && (
+          {/* Photo Preview */}
+          <View style={styles.photoConfirmPreview}>
+            {userPhoto && (
               <Image
-                source={{ uri: frontImage.uri }}
-                style={styles.confirmPhotoLarge}
-                resizeMode="contain"
+                source={{ uri: userPhoto.uri }}
+                style={styles.photoConfirmImage}
+                resizeMode="cover"
               />
             )}
           </View>
 
-          <View style={styles.confirmActions}>
+          {/* Actions */}
+          <View style={styles.photoConfirmActions}>
             <TouchableOpacity
               style={styles.retakeButton}
               onPress={() => {
-                setFrontImage(null);
-                setScreen("photoMethod");
+                setUserPhoto(null);
+                setScreen("photoCapture");
               }}
             >
               <Text style={styles.retakeButtonText}>Retake Photo</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={styles.confirmButton}
-              onPress={() => setScreen("gender")}
+              style={styles.confirmPhotoButton}
+              onPress={() => {
+                setScreen(flowType === "style" ? "styleSelect" : "refUpload");
+              }}
             >
-              <Text style={styles.confirmButtonText}>Photos Look Good ✓</Text>
+              <Text style={styles.confirmPhotoButtonText}>Looks Good ✓</Text>
             </TouchableOpacity>
           </View>
-        </ScrollView>
-      </SafeAreaView>
-    );
-  }
-
-  // GENDER SELECTION SCREEN
-  if (screen === "gender") {
-    return (
-      <SafeAreaView style={styles.container}>
-        <StatusBar style="light" />
-        <View style={styles.centerContent}>
-          <Text style={styles.screenTitle}>Client Gender</Text>
-          <Text style={styles.screenSubtitle}>
-            This helps us provide better style recommendations
-          </Text>
-
-          <View style={styles.genderOptions}>
-            <TouchableOpacity
-              style={[
-                styles.genderCard,
-                gender === "female" && styles.genderCardActive,
-              ]}
-              onPress={() => setGender("female")}
-            >
-              <Text style={styles.genderEmoji}>👩</Text>
-              <Text style={styles.genderLabel}>Female</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[
-                styles.genderCard,
-                gender === "male" && styles.genderCardActive,
-              ]}
-              onPress={() => setGender("male")}
-            >
-              <Text style={styles.genderEmoji}>👨</Text>
-              <Text style={styles.genderLabel}>Male</Text>
-            </TouchableOpacity>
-          </View>
-
-          <TouchableOpacity
-            style={styles.continueButton}
-            onPress={() => {
-              // Go to length selection first - analysis runs in background
-              setScreen("lengthSelect");
-            }}
-          >
-            <Text style={styles.continueButtonText}>Continue →</Text>
-          </TouchableOpacity>
         </View>
       </SafeAreaView>
     );
   }
 
-  // ANALYZING SCREEN
-  if (screen === "analyzing") {
-    return (
-      <SafeAreaView style={styles.container}>
-        <StatusBar style="light" />
-        <View style={styles.centerContent}>
-          <ActivityIndicator size="large" color="#6c5ce7" />
-          <Text style={styles.analyzingTitle}>Analyzing Hair...</Text>
-          <Text style={styles.analyzingSubtitle}>
-            Our AI is examining your client's hair characteristics
-          </Text>
-
-          <View style={styles.analyzingSteps}>
-            <Text style={styles.analyzingStep}>📐 Measuring hair length</Text>
-            <Text style={styles.analyzingStep}>
-              🌀 Detecting texture pattern
-            </Text>
-            <Text style={styles.analyzingStep}>🎨 Analyzing hair color</Text>
-            <Text style={styles.analyzingStep}>📊 Assessing density</Text>
-            <Text style={styles.analyzingStep}>✨ Evaluating condition</Text>
-          </View>
-
-          <Text style={styles.analyzingNote}>
-            This may take 10-20 seconds...
-          </Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  // ANALYSIS RESULT SCREEN (Hair Dashboard)
-  if (screen === "analysisResult") {
-    return (
-      <SafeAreaView style={styles.container}>
-        <StatusBar style="light" />
-        <ScrollView contentContainerStyle={styles.scrollContent}>
-          <Text style={styles.screenTitle}>Hair Analysis Complete</Text>
-
-          {hairAnalysis && (
-            <>
-              {/* Overall Score Card */}
-              <View style={styles.overallScoreCard}>
-                <Text style={styles.overallScoreLabel}>Overall Hair Score</Text>
-                <Text style={styles.overallScoreValue}>
-                  {hairAnalysis.overallScore}
-                </Text>
-                <Text style={styles.overallScoreMax}>/100</Text>
-                <Text style={styles.stylingPotential}>
-                  Styling Potential: {hairAnalysis.stylingPotential}
-                </Text>
-              </View>
-
-              {/* Hair Properties */}
-              <View style={styles.analysisSection}>
-                <Text style={styles.analysisSectionTitle}>Hair Properties</Text>
-
-                <View style={styles.propertyRow}>
-                  <View style={styles.propertyItem}>
-                    <Text style={styles.propertyLabel}>Texture</Text>
-                    <Text style={styles.propertyValue}>
-                      {hairAnalysis.hairTexture.value}
-                    </Text>
-                  </View>
-                  <View style={styles.propertyItem}>
-                    <Text style={styles.propertyLabel}>Density</Text>
-                    <Text style={styles.propertyValue}>
-                      {hairAnalysis.hairDensity.value}
-                    </Text>
-                  </View>
-                </View>
-
-                <View style={styles.propertyRow}>
-                  <View style={styles.propertyItem}>
-                    <Text style={styles.propertyLabel}>Length</Text>
-                    <Text style={styles.propertyValue}>
-                      {hairAnalysis.hairLength.value}
-                    </Text>
-                  </View>
-                  <View style={styles.propertyItem}>
-                    <Text style={styles.propertyLabel}>Color</Text>
-                    <Text style={styles.propertyValue}>
-                      {hairAnalysis.hairColor.value}
-                    </Text>
-                  </View>
-                </View>
-
-                <View style={styles.propertyRow}>
-                  <View style={styles.propertyItem}>
-                    <Text style={styles.propertyLabel}>Face Shape</Text>
-                    <Text style={styles.propertyValue}>
-                      {hairAnalysis.faceShape.value}
-                    </Text>
-                  </View>
-                  <View style={styles.propertyItem}>
-                    <Text style={styles.propertyLabel}>Condition</Text>
-                    <Text style={styles.propertyValue}>
-                      {hairAnalysis.hairCondition.value}
-                    </Text>
-                  </View>
-                </View>
-              </View>
-            </>
-          )}
-
-          <TouchableOpacity
-            style={styles.continueButton}
-            onPress={() => setScreen("lengthSelect")}
-          >
-            <Text style={styles.continueButtonText}>
-              Choose Target Length →
-            </Text>
-          </TouchableOpacity>
-        </ScrollView>
-      </SafeAreaView>
-    );
-  }
-
-  // STYLE SELECTION SCREEN (Now shows styles based on selected length)
+  // STYLE SELECT SCREEN (Path A)
   if (screen === "styleSelect") {
-    // Get hairstyles for the selected length
-    const availableStyles = selectedLength
-      ? HAIRSTYLES_BY_LENGTH[gender][
-          selectedLength as keyof typeof HAIRSTYLES_BY_LENGTH.male
-        ] || []
-      : [];
-    const lengthLabel =
-      HAIR_LENGTHS.find((l) => l.id === selectedLength)?.label || "";
+    const filteredStyles = getFilteredHairstyles();
 
     return (
       <SafeAreaView style={styles.container}>
         <StatusBar style="light" />
-        <ScrollView contentContainerStyle={styles.scrollContent}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => setScreen("lengthSelect")}
-          >
-            <Text style={styles.backText}>← Back</Text>
-          </TouchableOpacity>
-
-          <Text style={styles.screenTitle}>Choose Hairstyle</Text>
-          <Text style={styles.screenSubtitle}>
-            Styles for {lengthLabel} hair
-          </Text>
-
-          {/* Background Analysis Status */}
-          {isAnalyzing && (
-            <View style={styles.analysisStatusBanner}>
-              <ActivityIndicator size="small" color="#6c5ce7" />
-              <Text style={styles.analysisStatusText}>
-                Analyzing hair in background...
-              </Text>
-            </View>
-          )}
-          {hairAnalysis && !isAnalyzing && (
+        <View style={styles.styleSelectContainer}>
+          {/* Header */}
+          <View style={styles.styleHeader}>
             <TouchableOpacity
-              style={styles.analysisCompleteBanner}
-              onPress={() => setScreen("analysisResult")}
+              style={styles.backButton}
+              onPress={() => {
+                setUserPhoto(null);
+                setScreen("photoCapture");
+              }}
             >
-              <Text style={styles.analysisCompleteText}>
-                ✓ Analysis complete • Tap to view
-              </Text>
+              <Text style={styles.backText}>← Back</Text>
             </TouchableOpacity>
-          )}
-
-          {/* Styles for selected length */}
-          <Text style={styles.sectionLabel}>Recommended Styles</Text>
-          <View style={styles.styleGrid}>
-            {availableStyles.map((style) => (
-              <TouchableOpacity
-                key={style}
-                style={[
-                  styles.styleChip,
-                  selectedStyle === style && styles.styleChipActive,
-                ]}
-                onPress={() => {
-                  setSelectedStyle(style);
-                  setCustomStyleUrl("");
-                }}
-              >
-                <Text
-                  style={[
-                    styles.styleChipText,
-                    selectedStyle === style && styles.styleChipTextActive,
-                  ]}
-                >
-                  {style}
-                </Text>
-              </TouchableOpacity>
-            ))}
+            <Text style={styles.screenTitleSmall}>Choose Your Style</Text>
           </View>
 
-          {/* Custom Reference URL */}
-          <Text style={styles.sectionLabel}>Or Paste Reference Image URL</Text>
-          <TextInput
-            style={styles.urlInput}
-            placeholder="https://example.com/hairstyle.jpg"
-            placeholderTextColor="#666"
-            value={customStyleUrl}
-            onChangeText={(text) => {
-              setCustomStyleUrl(text);
-              if (text) setSelectedStyle("");
-            }}
-            autoCapitalize="none"
-            keyboardType="url"
-          />
-
-          {/* Upload Reference */}
-          <TouchableOpacity
-            style={styles.uploadRefButton}
-            onPress={async () => {
-              const result = await ImagePicker.launchImageLibraryAsync({
-                mediaTypes: ["images"],
-                quality: 0.8,
-              });
-              if (!result.canceled && result.assets[0]) {
-                setCustomStyleUrl(result.assets[0].uri);
-                setSelectedStyle("Custom Reference");
-              }
-            }}
-          >
-            <Text style={styles.uploadRefButtonText}>
-              📷 Upload Reference Photo
-            </Text>
-          </TouchableOpacity>
-
-          {(selectedStyle || customStyleUrl) && (
-            <TouchableOpacity
-              style={styles.continueButton}
-              onPress={() => setScreen("colorSelect")}
-            >
-              <Text style={styles.continueButtonText}>Choose Color →</Text>
-            </TouchableOpacity>
-          )}
-        </ScrollView>
-      </SafeAreaView>
-    );
-  }
-
-  // LENGTH SELECTION SCREEN (Now first step after gender)
-  if (screen === "lengthSelect") {
-    return (
-      <SafeAreaView style={styles.container}>
-        <StatusBar style="light" />
-        <ScrollView contentContainerStyle={styles.scrollContent}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => setScreen("gender")}
-          >
-            <Text style={styles.backText}>← Back</Text>
-          </TouchableOpacity>
-
-          <Text style={styles.screenTitle}>Target Hair Length</Text>
-          <Text style={styles.screenSubtitle}>
-            Select the desired length for the new style
-          </Text>
-
-          {/* Background Analysis Status */}
-          {isAnalyzing && (
-            <View style={styles.analysisStatusBanner}>
-              <ActivityIndicator size="small" color="#6c5ce7" />
-              <Text style={styles.analysisStatusText}>
-                Analyzing hair in background...
-              </Text>
-            </View>
-          )}
-          {hairAnalysis && !isAnalyzing && (
-            <TouchableOpacity
-              style={styles.analysisCompleteBanner}
-              onPress={() => setScreen("analysisResult")}
-            >
-              <Text style={styles.analysisCompleteText}>
-                ✓ Analysis complete • Tap to view
-              </Text>
-            </TouchableOpacity>
-          )}
-
-          <View style={styles.lengthOptions}>
-            {HAIR_LENGTHS.map((length) => (
-              <TouchableOpacity
-                key={length.id}
-                style={[
-                  styles.lengthOption,
-                  selectedLength === length.id && styles.lengthOptionActive,
-                ]}
-                onPress={() => setSelectedLength(length.id)}
-              >
-                <Text
-                  style={[
-                    styles.lengthLabel,
-                    selectedLength === length.id && styles.lengthLabelActive,
-                  ]}
-                >
-                  {length.label}
-                </Text>
-                <Text style={styles.lengthDesc}>{length.description}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-
-          {selectedLength && (
-            <TouchableOpacity
-              style={styles.continueButton}
-              onPress={() => setScreen("styleSelect")}
-            >
-              <Text style={styles.continueButtonText}>Choose Hairstyle →</Text>
-            </TouchableOpacity>
-          )}
-        </ScrollView>
-      </SafeAreaView>
-    );
-  }
-
-  // COLOR SELECTION SCREEN
-  if (screen === "colorSelect") {
-    return (
-      <SafeAreaView style={styles.container}>
-        <StatusBar style="light" />
-        <ScrollView contentContainerStyle={styles.scrollContent}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => setScreen("styleSelect")}
-          >
-            <Text style={styles.backText}>← Back</Text>
-          </TouchableOpacity>
-
-          <Text style={styles.screenTitle}>Hair Color</Text>
-          <Text style={styles.screenSubtitle}>
-            Select target hair color or keep natural
-          </Text>
-
-          {/* Background Analysis Status */}
-          {isAnalyzing && (
-            <View style={styles.analysisStatusBanner}>
-              <ActivityIndicator size="small" color="#6c5ce7" />
-              <Text style={styles.analysisStatusText}>
-                Analyzing hair in background...
-              </Text>
-            </View>
-          )}
-          {hairAnalysis && !isAnalyzing && (
-            <TouchableOpacity
-              style={styles.analysisCompleteBanner}
-              onPress={() => setScreen("analysisResult")}
-            >
-              <Text style={styles.analysisCompleteText}>
-                ✓ Analysis complete • Tap to view
-              </Text>
-            </TouchableOpacity>
-          )}
-
-          <View style={styles.colorGrid}>
-            {HAIR_COLORS.map((colorOption) => (
-              <TouchableOpacity
-                key={colorOption.id}
-                style={[
-                  styles.colorOption,
-                  selectedColor === colorOption.id && styles.colorOptionActive,
-                ]}
-                onPress={() => setSelectedColor(colorOption.id)}
-              >
-                {colorOption.color ? (
-                  <View
-                    style={[
-                      styles.colorSwatch,
-                      { backgroundColor: colorOption.color },
-                    ]}
-                  />
-                ) : (
-                  <View style={styles.naturalSwatch}>
-                    <Text style={styles.naturalSwatchText}>🎨</Text>
-                  </View>
-                )}
-                <Text
-                  style={[
-                    styles.colorName,
-                    selectedColor === colorOption.id && styles.colorNameActive,
-                  ]}
-                  numberOfLines={1}
-                >
-                  {colorOption.name}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-
-          <TouchableOpacity
-            style={styles.continueButton}
-            onPress={runFeasibilityAssessment}
-          >
-            <Text style={styles.continueButtonText}>Check Feasibility →</Text>
-          </TouchableOpacity>
-        </ScrollView>
-      </SafeAreaView>
-    );
-  }
-
-  // FEASIBILITY ASSESSMENT SCREEN
-  if (screen === "feasibility") {
-    return (
-      <SafeAreaView style={styles.container}>
-        <StatusBar style="light" />
-        <ScrollView contentContainerStyle={styles.scrollContent}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => setScreen("colorSelect")}
-          >
-            <Text style={styles.backText}>← Back</Text>
-          </TouchableOpacity>
-
-          <Text style={styles.screenTitle}>Feasibility Assessment</Text>
-
-          {/* Show if hair analysis is still running */}
-          {isAnalyzing && (
-            <View style={styles.analysisStatusBanner}>
-              <ActivityIndicator size="small" color="#6c5ce7" />
-              <Text style={styles.analysisStatusText}>
-                Hair analysis in progress... Please wait
-              </Text>
-            </View>
-          )}
-
-          {isAssessing ? (
-            <View style={styles.assessingContainer}>
-              <ActivityIndicator size="large" color="#6c5ce7" />
-              <Text style={styles.assessingText}>Analyzing feasibility...</Text>
-              <Text style={styles.assessingSubtext}>
-                Comparing current hair with target style
-              </Text>
-            </View>
-          ) : !hairAnalysis && !isAnalyzing ? (
-            <View style={styles.assessingContainer}>
-              <Text style={styles.assessingText}>⚠️ Analysis Required</Text>
-              <Text style={styles.assessingSubtext}>
-                Hair analysis failed or not available.
-              </Text>
-              <TouchableOpacity
-                style={[styles.continueButton, { marginTop: 20 }]}
-                onPress={startHairAnalysisBackground}
-              >
-                <Text style={styles.continueButtonText}>Retry Analysis</Text>
-              </TouchableOpacity>
-            </View>
-          ) : feasibility ? (
-            <>
-              {/* Overall Feasibility Score */}
-              <View
-                style={[
-                  styles.feasibilityHeader,
-                  feasibility.feasible
-                    ? styles.feasibilityPass
-                    : styles.feasibilityFail,
-                ]}
-              >
-                <Text style={styles.feasibilityEmoji}>
-                  {feasibility.feasible ? "✅" : "⚠️"}
-                </Text>
-                <Text style={styles.feasibilityStatus}>
-                  {feasibility.feasible
-                    ? "Style is Achievable!"
-                    : "Modifications Needed"}
-                </Text>
-                <Text style={styles.feasibilityScore}>
-                  {feasibility.overallScore}/100
-                </Text>
-              </View>
-
-              {/* Compatibility Scores */}
-              <View style={styles.compatibilitySection}>
-                <Text style={styles.compatibilityTitle}>
-                  Compatibility Analysis
-                </Text>
-
-                <ScoreBar
-                  label="Length Match"
-                  score={feasibility.lengthCompatibility.score}
-                  color={
-                    feasibility.lengthCompatibility.score >= 70
-                      ? "#00b894"
-                      : feasibility.lengthCompatibility.score >= 40
-                      ? "#fdcb6e"
-                      : "#e17055"
-                  }
-                />
-                <Text style={styles.compatibilityDesc}>
-                  {feasibility.lengthCompatibility.assessment}
-                </Text>
-                {feasibility.lengthCompatibility.timeToGrow && (
-                  <Text style={styles.growthTime}>
-                    ⏱️ Time to grow:{" "}
-                    {feasibility.lengthCompatibility.timeToGrow}
-                  </Text>
-                )}
-
-                <ScoreBar
-                  label="Texture Match"
-                  score={feasibility.textureCompatibility.score}
-                  color={
-                    feasibility.textureCompatibility.score >= 70
-                      ? "#00b894"
-                      : feasibility.textureCompatibility.score >= 40
-                      ? "#fdcb6e"
-                      : "#e17055"
-                  }
-                />
-                <Text style={styles.compatibilityDesc}>
-                  {feasibility.textureCompatibility.assessment}
-                </Text>
-
-                <ScoreBar
-                  label="Density Match"
-                  score={feasibility.densityCompatibility.score}
-                  color={
-                    feasibility.densityCompatibility.score >= 70
-                      ? "#00b894"
-                      : feasibility.densityCompatibility.score >= 40
-                      ? "#fdcb6e"
-                      : "#e17055"
-                  }
-                />
-                <Text style={styles.compatibilityDesc}>
-                  {feasibility.densityCompatibility.assessment}
-                </Text>
-              </View>
-
-              {/* Salon Info */}
-              <View style={styles.salonInfoSection}>
-                <View style={styles.salonInfoItem}>
-                  <Text style={styles.salonInfoLabel}>Estimated Time</Text>
-                  <Text style={styles.salonInfoValue}>
-                    {feasibility.estimatedSalonTime}
-                  </Text>
-                </View>
-                <View style={styles.salonInfoItem}>
-                  <Text style={styles.salonInfoLabel}>Maintenance</Text>
-                  <Text style={styles.salonInfoValue}>
-                    {feasibility.maintenanceLevel.value}
-                  </Text>
-                </View>
-              </View>
-
-              {/* Concerns */}
-              {feasibility.concerns.length > 0 && (
-                <View style={styles.concernsSection}>
-                  <Text style={styles.concernsTitle}>⚠️ Considerations</Text>
-                  {feasibility.concerns.map((concern, i) => (
-                    <Text key={i} style={styles.concernItem}>
-                      • {concern}
-                    </Text>
-                  ))}
-                </View>
-              )}
-
-              {/* Suggestions */}
-              {feasibility.suggestions.length > 0 && (
-                <View style={styles.suggestionsSection}>
-                  <Text style={styles.suggestionsTitle}>💡 Suggestions</Text>
-                  {feasibility.suggestions.map((suggestion, i) => (
-                    <Text key={i} style={styles.suggestionItem}>
-                      • {suggestion}
-                    </Text>
-                  ))}
-                </View>
-              )}
-
-              {/* Professional Notes */}
-              {feasibility.professionalNotes && (
-                <View style={styles.notesSection}>
-                  <Text style={styles.notesTitle}>📝 Stylist Notes</Text>
-                  <Text style={styles.notesText}>
-                    {feasibility.professionalNotes}
-                  </Text>
-                </View>
-              )}
-
-              {/* Generate Button */}
-              {feasibility.feasible && (
+          {/* Color Picker - Horizontal Swipable */}
+          <View style={styles.colorPickerSection}>
+            <Text style={styles.colorPickerLabel}>Hair Color</Text>
+            <FlatList
+              ref={colorScrollRef}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              data={HAIR_COLORS}
+              keyExtractor={(item) => item.id}
+              contentContainerStyle={styles.colorPickerList}
+              renderItem={({ item }) => (
                 <TouchableOpacity
-                  style={styles.generateButton}
-                  onPress={generateImages}
+                  style={[
+                    styles.colorChip,
+                    selectedColor === item.id && styles.colorChipActive,
+                  ]}
+                  onPress={() => setSelectedColor(item.id)}
                 >
-                  <Text style={styles.generateButtonText}>
-                    ✨ Generate Preview
-                  </Text>
-                  <Text style={styles.generateButtonNote}>
-                    This takes about 1 minute
+                  {item.color ? (
+                    <View
+                      style={[styles.colorDot, { backgroundColor: item.color }]}
+                    />
+                  ) : (
+                    <View style={styles.colorDotNatural}>
+                      <Text style={styles.colorDotNaturalText}>🎨</Text>
+                    </View>
+                  )}
+                  <Text
+                    style={[
+                      styles.colorChipText,
+                      selectedColor === item.id && styles.colorChipTextActive,
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {item.name}
                   </Text>
                 </TouchableOpacity>
               )}
+            />
+          </View>
 
-              {!feasibility.feasible && (
-                <View style={styles.notFeasibleActions}>
-                  <TouchableOpacity
-                    style={styles.modifyStyleButton}
-                    onPress={() => setScreen("styleSelect")}
+          {/* Length Filter */}
+          <View style={styles.filterSection}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.filterList}
+            >
+              {HAIR_LENGTH_FILTERS.map((filter) => (
+                <TouchableOpacity
+                  key={filter.id}
+                  style={[
+                    styles.filterChip,
+                    selectedLengthFilter === filter.id &&
+                      styles.filterChipActive,
+                  ]}
+                  onPress={() => setSelectedLengthFilter(filter.id)}
+                >
+                  <Text
+                    style={[
+                      styles.filterChipText,
+                      selectedLengthFilter === filter.id &&
+                        styles.filterChipTextActive,
+                    ]}
                   >
-                    <Text style={styles.modifyStyleText}>
-                      Modify Style Selection
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.generateButton, styles.generateAnywayButton]}
-                    onPress={generateImages}
-                  >
-                    <Text style={styles.generateButtonText}>
-                      Generate Anyway
-                    </Text>
-                  </TouchableOpacity>
+                    {filter.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+
+          {/* Hairstyles Grid */}
+          <ScrollView
+            style={styles.stylesScrollView}
+            contentContainerStyle={styles.stylesGrid}
+          >
+            {filteredStyles.map((style) => (
+              <TouchableOpacity
+                key={style}
+                style={[
+                  styles.styleCard,
+                  selectedStyle === style && styles.styleCardActive,
+                ]}
+                onPress={() => setSelectedStyle(style)}
+              >
+                {/* Placeholder for AI preview */}
+                <View style={styles.stylePreviewPlaceholder}>
+                  <Text style={styles.stylePreviewIcon}>💇</Text>
                 </View>
+                <Text
+                  style={[
+                    styles.styleCardText,
+                    selectedStyle === style && styles.styleCardTextActive,
+                  ]}
+                  numberOfLines={2}
+                >
+                  {style}
+                </Text>
+                {selectedStyle === style && (
+                  <View style={styles.styleCardCheck}>
+                    <Text style={styles.checkMarkSmall}>✓</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+
+          {/* Generate Button */}
+          {selectedStyle && (
+            <TouchableOpacity
+              style={styles.generateButton}
+              onPress={generateImages}
+            >
+              <Text style={styles.generateButtonText}>Generate Preview ✨</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // REF UPLOAD SCREEN (Path B)
+  if (screen === "refUpload") {
+    return (
+      <SafeAreaView style={styles.container}>
+        <StatusBar style="light" />
+        <ScrollView contentContainerStyle={styles.refUploadContent}>
+          {/* Header */}
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => {
+              setUserPhoto(null);
+              setRefImage(null);
+              setRefImageDescription("");
+              setScreen("photoCapture");
+            }}
+          >
+            <Text style={styles.backText}>← Back</Text>
+          </TouchableOpacity>
+
+          <Text style={styles.screenTitle}>Reference Hairstyle</Text>
+          <Text style={styles.screenSubtitle}>
+            Upload or paste a URL of the hairstyle you want
+          </Text>
+
+          {/* Color Picker - Horizontal Swipable */}
+          <View style={styles.colorPickerSection}>
+            <Text style={styles.colorPickerLabel}>Target Hair Color</Text>
+            <FlatList
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              data={HAIR_COLORS}
+              keyExtractor={(item) => item.id}
+              contentContainerStyle={styles.colorPickerList}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={[
+                    styles.colorChip,
+                    selectedColor === item.id && styles.colorChipActive,
+                  ]}
+                  onPress={() => setSelectedColor(item.id)}
+                >
+                  {item.color ? (
+                    <View
+                      style={[styles.colorDot, { backgroundColor: item.color }]}
+                    />
+                  ) : (
+                    <View style={styles.colorDotNatural}>
+                      <Text style={styles.colorDotNaturalText}>🎨</Text>
+                    </View>
+                  )}
+                  <Text
+                    style={[
+                      styles.colorChipText,
+                      selectedColor === item.id && styles.colorChipTextActive,
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {item.name}
+                  </Text>
+                </TouchableOpacity>
               )}
-            </>
-          ) : null}
+            />
+          </View>
+
+          {/* Reference Image Section */}
+          <View style={styles.refImageSection}>
+            {refImage ? (
+              <View style={styles.refPreviewContainer}>
+                <Image
+                  source={{ uri: refImage.uri }}
+                  style={styles.refPreviewImage}
+                  resizeMode="cover"
+                />
+                <TouchableOpacity
+                  style={styles.refRemoveBtn}
+                  onPress={() => {
+                    setRefImage(null);
+                    setRefImageDescription("");
+                  }}
+                >
+                  <Text style={styles.refRemoveText}>✕</Text>
+                </TouchableOpacity>
+
+                {/* Analysis Status */}
+                {isAnalyzingRef && (
+                  <View style={styles.refAnalyzingOverlay}>
+                    <ActivityIndicator size="large" color="#fff" />
+                    <Text style={styles.refAnalyzingText}>
+                      Analyzing hairstyle...
+                    </Text>
+                  </View>
+                )}
+
+                {/* Description */}
+                {refImageDescription && !isAnalyzingRef && (
+                  <View style={styles.refDescriptionBox}>
+                    <Text style={styles.refDescriptionLabel}>AI Analysis:</Text>
+                    <Text style={styles.refDescriptionText}>
+                      {refImageDescription}
+                    </Text>
+                  </View>
+                )}
+              </View>
+            ) : (
+              <>
+                {/* Upload Button */}
+                <TouchableOpacity
+                  style={styles.refUploadCard}
+                  onPress={pickRefImage}
+                >
+                  <Text style={styles.refUploadIcon}>📷</Text>
+                  <Text style={styles.refUploadText}>
+                    Upload Reference Image
+                  </Text>
+                </TouchableOpacity>
+
+                {/* URL Input */}
+                <Text style={styles.orDivider}>— or paste URL —</Text>
+                <TextInput
+                  style={styles.urlInput}
+                  placeholder="https://example.com/hairstyle.jpg"
+                  placeholderTextColor="#666"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  onSubmitEditing={(e) => {
+                    const url = e.nativeEvent.text;
+                    if (url.startsWith("http")) {
+                      setRefImage({ uri: url });
+                      analyzeRefImage(url);
+                    }
+                  }}
+                />
+              </>
+            )}
+          </View>
+
+          {/* Important Notice */}
+          <View style={styles.warningBox}>
+            <Text style={styles.warningIcon}>⚠️</Text>
+            <View style={styles.warningContent}>
+              <Text style={styles.warningTitle}>For Best Results</Text>
+              <Text style={styles.warningText}>
+                • Use a close-up face shot showing the full hairstyle{"\n"}•
+                Front-facing reference images work best{"\n"}• Ensure the hair
+                is clearly visible{"\n"}• Side or angled photos may produce less
+                accurate results
+              </Text>
+            </View>
+          </View>
+
+          {/* Generate Button */}
+          {refImage && refImageDescription && !isAnalyzingRef && (
+            <TouchableOpacity
+              style={styles.generateButton}
+              onPress={generateImages}
+            >
+              <Text style={styles.generateButtonText}>Generate Preview ✨</Text>
+            </TouchableOpacity>
+          )}
         </ScrollView>
       </SafeAreaView>
     );
@@ -1614,53 +1200,59 @@ export default function App() {
 
   // GENERATING SCREEN
   if (screen === "generating") {
+    // Calculate perceived time (60 seconds total)
+    const perceivedMinutes = Math.floor(
+      (60 * (100 - generationProgress)) / 100 / 60
+    );
+    const perceivedSeconds =
+      Math.floor((60 * (100 - generationProgress)) / 100) % 60;
+
     return (
       <SafeAreaView style={styles.container}>
         <StatusBar style="light" />
-        <View style={styles.centerContent}>
-          <Text style={styles.generatingEmoji}>✨</Text>
-          <Text style={styles.generatingTitle}>Creating Your Preview</Text>
-          <Text style={styles.generatingSubtitle}>
-            Our AI is generating your new hairstyle
-          </Text>
+        <View style={styles.generatingContent}>
+          {/* Animated Icon */}
+          <View style={styles.generatingIconContainer}>
+            <Text style={styles.generatingIcon}>✨</Text>
+          </View>
+
+          <Text style={styles.generatingTitle}>Creating Your Look</Text>
+          <Text style={styles.generatingSubtitle}>{generationStep}</Text>
 
           {/* Progress Bar */}
-          <View style={styles.generatingProgressContainer}>
-            <View style={styles.generatingProgressBar}>
+          <View style={styles.progressContainer}>
+            <View style={styles.progressBar}>
               <View
                 style={[
-                  styles.generatingProgressFill,
+                  styles.progressFill,
                   { width: `${generationProgress}%` },
                 ]}
               />
             </View>
-            <Text style={styles.generatingProgressText}>
-              {generationProgress}%
+            <Text style={styles.progressText}>{generationProgress}%</Text>
+          </View>
+
+          {/* Time Estimate */}
+          <View style={styles.timeEstimate}>
+            <Text style={styles.timeEstimateLabel}>
+              Estimated time remaining
+            </Text>
+            <Text style={styles.timeEstimateValue}>
+              ~{perceivedSeconds > 0 ? `${perceivedSeconds}s` : "Almost done!"}
             </Text>
           </View>
 
-          <View style={styles.generatingSteps}>
-            <Text
-              style={[
-                styles.generatingStep,
-                generationProgress >= 20 && styles.generatingStepActive,
-                generationProgress >= 90 && styles.generatingStepDone,
-              ]}
-            >
-              {generationProgress >= 90 ? "✓" : "⚡"} Generating your new
-              hairstyle...
-            </Text>
-            <Text style={styles.generatingStepNote}>
-              AI is creating your transformation
-            </Text>
-          </View>
-
-          <View style={styles.patienceBox}>
-            <Text style={styles.patienceEmoji}>⚡</Text>
-            <Text style={styles.patienceTitle}>Almost there!</Text>
-            <Text style={styles.patienceText}>
-              Generating high-quality preview (~20-30 seconds).{"\n"}
-              Quality results coming soon!
+          {/* Fun Facts */}
+          <View style={styles.funFactBox}>
+            <Text style={styles.funFactIcon}>💡</Text>
+            <Text style={styles.funFactText}>
+              {generationProgress < 30
+                ? "Analyzing your unique hair characteristics..."
+                : generationProgress < 60
+                ? "AI is learning your facial features..."
+                : generationProgress < 90
+                ? "Crafting the perfect hairstyle for you..."
+                : "Putting on the finishing touches..."}
             </Text>
           </View>
         </View>
@@ -1668,68 +1260,71 @@ export default function App() {
     );
   }
 
-  // RESULT SCREEN - Before/After Comparison
+  // RESULT SCREEN - Vertical comparison, maximized
   if (screen === "result") {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={styles.resultContainer}>
         <StatusBar style="light" />
-        <ScrollView contentContainerStyle={styles.scrollContent}>
-          <Text style={styles.resultTitle}>Your New Look Preview</Text>
-          <Text style={styles.resultSubtitle}>
-            {selectedStyle || "Custom Style"} • {selectedLength} •{" "}
-            {HAIR_COLORS.find((c) => c.id === selectedColor)?.name || "Natural"}
-          </Text>
 
-          {/* Before/After Comparison */}
-          <View style={styles.comparisonRow}>
-            <Text style={styles.comparisonRowTitle}>✨ Transformation</Text>
-            <View style={styles.comparisonImages}>
-              <View style={styles.comparisonImageBox}>
-                <Text style={styles.comparisonImageLabel}>Before</Text>
-                {frontImage && (
-                  <Image
-                    source={{ uri: frontImage.uri }}
-                    style={styles.comparisonImage}
-                    resizeMode="cover"
-                  />
-                )}
-              </View>
-              <View style={styles.comparisonArrow}>
-                <Text style={styles.arrowText}>→</Text>
-              </View>
-              <View style={styles.comparisonImageBox}>
-                <Text style={styles.comparisonImageLabel}>After</Text>
-                {generatedImages[0] && (
-                  <Image
-                    source={{ uri: generatedImages[0] }}
-                    style={styles.comparisonImage}
-                    resizeMode="cover"
-                  />
-                )}
-              </View>
-            </View>
+        {/* Minimal Header */}
+        <View style={styles.resultHeader}>
+          <Text style={styles.resultTitle}>Your New Look</Text>
+        </View>
+
+        {/* Comparison - Vertical Layout */}
+        <View style={styles.comparisonContainer}>
+          {/* Original Photo - Top */}
+          <View style={styles.comparisonImageWrapper}>
+            <Text style={styles.comparisonLabel}>BEFORE</Text>
+            {userPhoto && (
+              <Image
+                source={{ uri: userPhoto.uri }}
+                style={styles.comparisonImageFull}
+                resizeMode="cover"
+              />
+            )}
           </View>
 
-          {/* Actions */}
-          <View style={styles.resultActions}>
-            <TouchableOpacity
-              style={styles.tryAnotherButton}
-              onPress={() => setScreen("styleSelect")}
-            >
-              <Text style={styles.tryAnotherText}>Try Another Style</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.newClientButton} onPress={resetApp}>
-              <Text style={styles.newClientText}>New Client</Text>
-            </TouchableOpacity>
+          {/* Divider */}
+          <View style={styles.comparisonDivider}>
+            <View style={styles.dividerLine} />
+            <Text style={styles.dividerIcon}>↓</Text>
+            <View style={styles.dividerLine} />
           </View>
 
-          {/* Disclaimer */}
-          <Text style={styles.disclaimer}>
-            💡 These previews are AI-generated approximations.{"\n"}
-            Actual results may vary based on individual hair characteristics.
-          </Text>
-        </ScrollView>
+          {/* Generated Photo - Bottom */}
+          <View style={styles.comparisonImageWrapper}>
+            <Text style={styles.comparisonLabel}>AFTER</Text>
+            {generatedImage && (
+              <Image
+                source={{ uri: generatedImage }}
+                style={styles.comparisonImageFull}
+                resizeMode="cover"
+              />
+            )}
+          </View>
+        </View>
+
+        {/* Actions */}
+        <View style={styles.resultActions}>
+          <TouchableOpacity
+            style={styles.resultActionBtn}
+            onPress={() => {
+              setSelectedStyle("");
+              setGeneratedImage(null);
+              setScreen(flowType === "style" ? "styleSelect" : "refUpload");
+            }}
+          >
+            <Text style={styles.resultActionText}>Try Another</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.resultActionBtn, styles.resultActionBtnPrimary]}
+            onPress={resetApp}
+          >
+            <Text style={styles.resultActionTextPrimary}>Start Over</Text>
+          </TouchableOpacity>
+        </View>
       </SafeAreaView>
     );
   }
@@ -1737,348 +1332,278 @@ export default function App() {
   return null;
 }
 
-// Icon styles
-const iconStyles = StyleSheet.create({
-  faceContainer: {
-    alignItems: "center",
-    marginBottom: 10,
-  },
-  sideIconContainer: {
-    alignItems: "center",
-    marginBottom: 10,
-    width: 80,
-  },
-  faceOutline: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    borderWidth: 2,
-    borderColor: "#6c5ce7",
-    backgroundColor: "#1a1a2e",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  faceEmoji: {
-    fontSize: 32,
-  },
-  arrowDown: {
-    marginTop: 5,
-  },
-  arrowText: {
-    color: "#6c5ce7",
-    fontSize: 20,
-  },
-  angleIndicator: {
-    position: "absolute",
-    bottom: -5,
-    right: -20,
-    backgroundColor: "#6c5ce7",
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 10,
-  },
-  angleText: {
-    color: "#fff",
-    fontSize: 12,
-    fontWeight: "bold",
-  },
-});
-
-// Overlay styles for camera
-const overlayStyles = StyleSheet.create({
-  container: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  darkOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0,0,0,0.3)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  faceGuide: {
-    width: SCREEN_WIDTH * 0.65,
-    height: SCREEN_WIDTH * 0.85,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  faceGuideSide: {
-    transform: [{ rotateY: "15deg" }],
-  },
-  faceOval: {
-    width: "100%",
-    height: "100%",
-    borderWidth: 3,
-    borderColor: "#6c5ce7",
-    borderRadius: SCREEN_WIDTH * 0.35,
-    backgroundColor: "transparent",
-    overflow: "hidden",
-  },
-  eyeLine: {
-    position: "absolute",
-    top: "35%",
-    left: "15%",
-    right: "15%",
-    height: 1,
-    backgroundColor: "rgba(108, 92, 231, 0.5)",
-  },
-  noseLine: {
-    position: "absolute",
-    top: "50%",
-    left: "45%",
-    right: "45%",
-    height: 1,
-    backgroundColor: "rgba(108, 92, 231, 0.5)",
-  },
-  centerLine: {
-    position: "absolute",
-    top: "20%",
-    bottom: "20%",
-    left: "50%",
-    width: 1,
-    backgroundColor: "rgba(108, 92, 231, 0.3)",
-  },
-  sideProfile: {
-    position: "absolute",
-    top: "30%",
-    left: "30%",
-    width: "40%",
-    height: "40%",
-    borderLeftWidth: 2,
-    borderColor: "rgba(108, 92, 231, 0.5)",
-    borderTopLeftRadius: 50,
-  },
-  angleArrow: {
-    position: "absolute",
-    top: "50%",
-    backgroundColor: "#6c5ce7",
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  angleText: {
-    color: "#fff",
-    fontWeight: "bold",
-    fontSize: 14,
-  },
-  instructionBox: {
-    position: "absolute",
-    bottom: 150,
-    left: 20,
-    right: 20,
-    backgroundColor: "rgba(0,0,0,0.8)",
-    borderRadius: 16,
-    padding: 16,
-    alignItems: "center",
-  },
-  instructionTitle: {
-    color: "#fff",
-    fontSize: 20,
-    fontWeight: "bold",
-    marginBottom: 8,
-  },
-  instructionText: {
-    color: "#ccc",
-    fontSize: 14,
-    textAlign: "center",
-    lineHeight: 22,
-  },
-});
-
-// Score bar styles
-const scoreStyles = StyleSheet.create({
-  container: {
-    marginBottom: 12,
-  },
-  labelRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: 6,
-  },
-  label: {
-    color: "#fff",
-    fontSize: 14,
-    textTransform: "capitalize",
-  },
-  value: {
-    color: "#888",
-    fontSize: 14,
-  },
-  barBackground: {
-    height: 8,
-    backgroundColor: "#1a1a2e",
-    borderRadius: 4,
-    overflow: "hidden",
-  },
-  barFill: {
-    height: "100%",
-    borderRadius: 4,
-  },
-});
-
-// Main styles
+// ============ STYLES ============
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#0f0f1a",
-  },
-  scrollContent: {
-    padding: 20,
-    paddingBottom: 40,
-  },
-  centerContent: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 20,
+    backgroundColor: "#0a0a0f",
   },
 
-  // Welcome Screen
-  welcomeContent: {
-    flex: 1,
-    justifyContent: "center",
+  // Initial Screen
+  initialContent: {
+    flexGrow: 1,
+    padding: 24,
+    paddingTop: 60,
+  },
+  logoSection: {
     alignItems: "center",
-    padding: 20,
+    marginBottom: 40,
   },
-  welcomeLogo: {
-    fontSize: 80,
-    marginBottom: 10,
-  },
-  welcomeTitle: {
-    fontSize: 48,
-    fontWeight: "bold",
-    color: "#fff",
+  logoEmoji: {
+    fontSize: 64,
     marginBottom: 8,
   },
-  welcomeSubtitle: {
+  logoTitle: {
+    fontSize: 42,
+    fontWeight: "800",
+    color: "#fff",
+    letterSpacing: -1,
+  },
+  logoSubtitle: {
     fontSize: 16,
+    color: "#666",
+    marginTop: 4,
+  },
+  selectionSection: {
+    marginBottom: 32,
+  },
+  sectionLabel: {
+    fontSize: 14,
     color: "#888",
-    textAlign: "center",
-    marginBottom: 40,
+    marginBottom: 12,
+    textTransform: "uppercase",
+    letterSpacing: 1,
   },
-  welcomeFeatures: {
-    width: "100%",
-    marginBottom: 40,
+  genderRow: {
+    flexDirection: "row",
+    gap: 12,
   },
-  featureItem: {
+  genderPill: {
+    flex: 1,
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#1a1a2e",
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 12,
-  },
-  featureIcon: {
-    fontSize: 24,
-    marginRight: 12,
-  },
-  featureText: {
-    color: "#fff",
-    fontSize: 16,
-  },
-  startButton: {
-    backgroundColor: "#6c5ce7",
-    paddingVertical: 18,
-    paddingHorizontal: 60,
+    justifyContent: "center",
+    backgroundColor: "#1a1a24",
+    paddingVertical: 16,
+    paddingHorizontal: 20,
     borderRadius: 16,
-    marginBottom: 20,
+    borderWidth: 2,
+    borderColor: "transparent",
+    gap: 8,
   },
-  startButtonText: {
-    color: "#fff",
-    fontSize: 18,
+  genderPillActive: {
+    borderColor: "#7c5cff",
+    backgroundColor: "#1f1a30",
+  },
+  genderEmoji: {
+    fontSize: 24,
+  },
+  genderText: {
+    fontSize: 16,
+    color: "#888",
     fontWeight: "600",
   },
-  welcomeNote: {
+  genderTextActive: {
+    color: "#fff",
+  },
+  flowCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#1a1a24",
+    padding: 16,
+    borderRadius: 16,
+    marginBottom: 12,
+    borderWidth: 2,
+    borderColor: "transparent",
+  },
+  flowCardActive: {
+    borderColor: "#7c5cff",
+    backgroundColor: "#1f1a30",
+  },
+  flowCardIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: "#252530",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 14,
+  },
+  flowEmoji: {
+    fontSize: 24,
+  },
+  flowCardContent: {
+    flex: 1,
+  },
+  flowCardTitle: {
+    fontSize: 17,
+    fontWeight: "700",
+    color: "#fff",
+    marginBottom: 4,
+  },
+  flowCardDesc: {
+    fontSize: 13,
     color: "#666",
-    fontSize: 14,
-    textAlign: "center",
+    lineHeight: 18,
+  },
+  flowCardCheck: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: "#7c5cff",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  checkMark: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "bold",
+  },
+  primaryButton: {
+    backgroundColor: "#7c5cff",
+    paddingVertical: 18,
+    borderRadius: 16,
+    alignItems: "center",
+    marginTop: "auto",
+  },
+  primaryButtonText: {
+    color: "#fff",
+    fontSize: 18,
+    fontWeight: "700",
   },
 
-  // Navigation
+  // Photo Capture Screen
+  photoCaptureContent: {
+    flex: 1,
+    padding: 24,
+    paddingTop: 16,
+  },
   backButton: {
     marginBottom: 20,
   },
   backText: {
-    color: "#6c5ce7",
+    color: "#7c5cff",
     fontSize: 16,
+    fontWeight: "600",
   },
   screenTitle: {
-    color: "#fff",
     fontSize: 28,
-    fontWeight: "bold",
+    fontWeight: "800",
+    color: "#fff",
     marginBottom: 8,
   },
   screenSubtitle: {
-    color: "#888",
-    fontSize: 16,
-    marginBottom: 30,
+    fontSize: 15,
+    color: "#666",
+    marginBottom: 32,
+    lineHeight: 22,
   },
-
-  // Photo Method Screen
-  methodCards: {
+  photoOptions: {
+    flexDirection: "row",
     gap: 16,
-    marginBottom: 30,
+    marginBottom: 32,
   },
-  methodCard: {
-    backgroundColor: "#6c5ce7",
+  photoOptionCard: {
+    flex: 1,
+    backgroundColor: "#1a1a24",
     borderRadius: 20,
     padding: 24,
     alignItems: "center",
   },
-  methodCardSecondary: {
-    backgroundColor: "#1a1a2e",
+  photoOptionIcon: {
+    fontSize: 40,
+    marginBottom: 12,
+  },
+  photoOptionTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#fff",
+    marginBottom: 4,
+  },
+  photoOptionDesc: {
+    fontSize: 12,
+    color: "#666",
+  },
+  tipsBox: {
+    backgroundColor: "#1a1a24",
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 24,
+  },
+  tipsTitle: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#fff",
+    marginBottom: 12,
+  },
+  tipItem: {
+    fontSize: 14,
+    color: "#888",
+    marginBottom: 6,
+    lineHeight: 20,
+  },
+  demoButton: {
+    backgroundColor: "rgba(124, 92, 255, 0.2)",
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: "center",
+  },
+  demoButtonText: {
+    color: "#7c5cff",
+    fontSize: 15,
+    fontWeight: "600",
+  },
+
+  // Photo Confirm Screen
+  photoConfirmContent: {
+    flex: 1,
+    padding: 24,
+    paddingTop: 16,
+  },
+  photoConfirmPreview: {
+    flex: 1,
+    borderRadius: 20,
+    overflow: "hidden",
+    backgroundColor: "#1a1a24",
+    marginVertical: 20,
+  },
+  photoConfirmImage: {
+    width: "100%",
+    height: "100%",
+  },
+  photoConfirmActions: {
+    flexDirection: "row",
+    gap: 12,
+    marginBottom: 20,
+  },
+  retakeButton: {
+    flex: 1,
+    backgroundColor: "#1a1a24",
+    paddingVertical: 16,
+    borderRadius: 14,
+    alignItems: "center",
     borderWidth: 1,
     borderColor: "#333",
   },
-  methodTitle: {
-    color: "#fff",
-    fontSize: 20,
-    fontWeight: "600",
-    marginTop: 12,
-    marginBottom: 6,
-  },
-  methodDesc: {
-    color: "rgba(255,255,255,0.7)",
-    fontSize: 14,
-    textAlign: "center",
-  },
-  methodBadge: {
-    backgroundColor: "#00b894",
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 12,
-    marginTop: 12,
-  },
-  methodBadgeText: {
-    color: "#fff",
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  requirementsBox: {
-    backgroundColor: "#1a1a2e",
-    borderRadius: 16,
-    padding: 20,
-  },
-  requirementsTitle: {
+  retakeButtonText: {
     color: "#fff",
     fontSize: 16,
     fontWeight: "600",
-    marginBottom: 16,
   },
-  requirementItem: {
-    flexDirection: "row",
+  confirmPhotoButton: {
+    flex: 1,
+    backgroundColor: "#00b894",
+    paddingVertical: 16,
+    borderRadius: 14,
     alignItems: "center",
-    marginBottom: 12,
   },
-  requirementIcon: {
-    fontSize: 18,
-    marginRight: 12,
-  },
-  requirementText: {
-    color: "#ccc",
-    fontSize: 14,
+  confirmPhotoButtonText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "700",
   },
 
-  // Camera Screen
+  // Camera
   cameraContainer: {
     flex: 1,
     backgroundColor: "#000",
@@ -2086,60 +1611,46 @@ const styles = StyleSheet.create({
   camera: {
     flex: 1,
   },
-  cameraProgress: {
-    position: "absolute",
-    top: 60,
-    left: 0,
-    right: 0,
-    flexDirection: "row",
-    justifyContent: "center",
+  cameraOverlay: {
+    ...StyleSheet.absoluteFillObject,
     alignItems: "center",
-  },
-  progressDot: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: "#1a1a2e",
-    borderWidth: 2,
-    borderColor: "#333",
     justifyContent: "center",
-    alignItems: "center",
   },
-  progressDotActive: {
-    borderColor: "#6c5ce7",
-    backgroundColor: "#6c5ce7",
+  faceGuide: {
+    width: SCREEN_WIDTH * 0.7,
+    height: SCREEN_WIDTH * 0.9,
+    borderRadius: SCREEN_WIDTH * 0.35,
+    borderWidth: 3,
+    borderColor: "rgba(124, 92, 255, 0.6)",
+    borderStyle: "dashed",
   },
-  progressDotDone: {
-    borderColor: "#00b894",
-    backgroundColor: "#00b894",
-  },
-  progressNum: {
+  cameraHint: {
     color: "#fff",
-    fontSize: 14,
-    fontWeight: "bold",
-  },
-  progressLine: {
-    width: 40,
-    height: 2,
-    backgroundColor: "#333",
-    marginHorizontal: 8,
+    fontSize: 16,
+    marginTop: 24,
+    textAlign: "center",
+    backgroundColor: "rgba(0,0,0,0.5)",
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 20,
   },
   cameraControls: {
     position: "absolute",
-    bottom: 40,
-    left: 20,
-    right: 20,
+    bottom: 50,
+    left: 0,
+    right: 0,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+    paddingHorizontal: 40,
   },
-  cameraBackButton: {
+  cameraBackBtn: {
     width: 50,
     height: 50,
     borderRadius: 25,
-    backgroundColor: "rgba(0,0,0,0.5)",
-    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.2)",
     alignItems: "center",
+    justifyContent: "center",
   },
   cameraBackText: {
     color: "#fff",
@@ -2150,908 +1661,503 @@ const styles = StyleSheet.create({
     height: 80,
     borderRadius: 40,
     backgroundColor: "#fff",
-    justifyContent: "center",
     alignItems: "center",
+    justifyContent: "center",
     borderWidth: 4,
-    borderColor: "#6c5ce7",
+    borderColor: "#7c5cff",
   },
   captureButtonInner: {
     width: 60,
     height: 60,
     borderRadius: 30,
-    backgroundColor: "#6c5ce7",
+    backgroundColor: "#7c5cff",
   },
   cameraPlaceholder: {
     width: 50,
   },
 
-  // Upload Screen
-  uploadGuideCards: {
-    gap: 20,
-    marginBottom: 20,
-  },
-  uploadGuideCard: {
-    backgroundColor: "#1a1a2e",
-    borderRadius: 16,
-    padding: 20,
-  },
-  uploadGuideCardContent: {
-    alignItems: "center",
-  },
-  uploadGuideTitle: {
-    color: "#fff",
-    fontSize: 16,
-    fontWeight: "600",
-    marginBottom: 10,
-    textAlign: "center",
-  },
-  uploadGuideDesc: {
-    color: "#888",
-    fontSize: 14,
-    lineHeight: 22,
-    marginBottom: 16,
-  },
-  uploadButton: {
-    backgroundColor: "#6c5ce7",
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-    borderRadius: 12,
-  },
-  uploadButtonText: {
-    color: "#fff",
-    fontSize: 16,
-    fontWeight: "600",
-  },
-  uploadPreviewContainer: {
-    alignItems: "center",
-  },
-  uploadPreview: {
-    width: 120,
-    height: 120,
-    borderRadius: 12,
-    marginBottom: 10,
-  },
-  changePhotoButton: {
-    backgroundColor: "#333",
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-  },
-  changePhotoText: {
-    color: "#fff",
-    fontSize: 14,
-  },
-  continueButton: {
-    backgroundColor: "#6c5ce7",
-    paddingVertical: 18,
-    borderRadius: 16,
-    alignItems: "center",
-    marginTop: 20,
-  },
-  continueButtonText: {
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: "600",
-  },
-  demoButton: {
-    backgroundColor: "#2d3436",
-    paddingVertical: 14,
-    borderRadius: 12,
-    alignItems: "center",
-    marginTop: 20,
-    borderWidth: 1,
-    borderColor: "#636e72",
-    borderStyle: "dashed",
-  },
-  demoButtonText: {
-    color: "#b2bec3",
-    fontSize: 14,
-  },
-
-  // Photo Confirm Screen
-  swipeHint: {
-    color: "#666",
-    fontSize: 14,
-    textAlign: "center",
-    marginBottom: 12,
-  },
-  confirmPhotoScroll: {
-    marginBottom: 30,
-  },
-  confirmPhotoScrollContent: {
-    gap: 0,
-  },
-  confirmPhotoSlide: {
-    width: SCREEN_WIDTH - 40,
-    alignItems: "center",
-  },
-  confirmPhotoContainer: {
-    alignItems: "center",
-    marginBottom: 24,
-  },
-  confirmPhotoLabel: {
-    color: "#fff",
-    fontSize: 16,
-    fontWeight: "600",
-    marginBottom: 12,
-  },
-  confirmPhotoLarge: {
-    width: SCREEN_WIDTH - 60,
-    height: SCREEN_WIDTH * 1.2,
-    borderRadius: 16,
-    backgroundColor: "#1a1a2e",
-  },
-  // Legacy styles kept for compatibility
-  confirmPhotos: {
-    flexDirection: "row",
-    gap: 12,
-    marginBottom: 30,
-  },
-  confirmPhotoCard: {
+  // Style Select Screen
+  styleSelectContainer: {
     flex: 1,
-    alignItems: "center",
   },
-  confirmPhoto: {
+  styleHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 16,
+    paddingTop: 8,
+  },
+  screenTitleSmall: {
+    fontSize: 20,
+    fontWeight: "700",
+    color: "#fff",
+    marginLeft: 16,
+  },
+  colorPickerSection: {
+    paddingTop: 8,
+    paddingBottom: 16,
+  },
+  colorPickerLabel: {
+    fontSize: 13,
+    color: "#888",
+    marginLeft: 16,
+    marginBottom: 10,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  colorPickerList: {
+    paddingHorizontal: 12,
+    gap: 8,
+  },
+  colorChip: {
+    alignItems: "center",
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    backgroundColor: "#1a1a24",
+    minWidth: 70,
+  },
+  colorChipActive: {
+    backgroundColor: "#2d2a40",
+    borderWidth: 2,
+    borderColor: "#7c5cff",
+  },
+  colorDot: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    marginBottom: 6,
+    borderWidth: 2,
+    borderColor: "#333",
+  },
+  colorDotNatural: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#252530",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 6,
+  },
+  colorDotNaturalText: {
+    fontSize: 16,
+  },
+  colorChipText: {
+    fontSize: 11,
+    color: "#888",
+    textAlign: "center",
+  },
+  colorChipTextActive: {
+    color: "#fff",
+    fontWeight: "600",
+  },
+  filterSection: {
+    borderBottomWidth: 1,
+    borderBottomColor: "#1a1a24",
+    paddingBottom: 12,
+  },
+  filterList: {
+    paddingHorizontal: 12,
+    gap: 8,
+  },
+  filterChip: {
+    paddingVertical: 8,
+    paddingHorizontal: 18,
+    borderRadius: 20,
+    backgroundColor: "#1a1a24",
+  },
+  filterChipActive: {
+    backgroundColor: "#7c5cff",
+  },
+  filterChipText: {
+    fontSize: 14,
+    color: "#888",
+    fontWeight: "600",
+  },
+  filterChipTextActive: {
+    color: "#fff",
+  },
+  stylesScrollView: {
+    flex: 1,
+  },
+  stylesGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    padding: 12,
+    gap: 12,
+  },
+  styleCard: {
+    width: (SCREEN_WIDTH - 48) / 3,
+    backgroundColor: "#1a1a24",
+    borderRadius: 14,
+    padding: 10,
+    alignItems: "center",
+    borderWidth: 2,
+    borderColor: "transparent",
+  },
+  styleCardActive: {
+    borderColor: "#7c5cff",
+    backgroundColor: "#1f1a30",
+  },
+  stylePreviewPlaceholder: {
     width: "100%",
     aspectRatio: 0.85,
-    borderRadius: 12,
-  },
-  confirmActions: {
-    gap: 12,
-  },
-  retakeButton: {
-    backgroundColor: "#1a1a2e",
-    paddingVertical: 16,
-    borderRadius: 12,
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#333",
-  },
-  retakeButtonText: {
-    color: "#fff",
-    fontSize: 16,
-  },
-  confirmButton: {
-    backgroundColor: "#00b894",
-    paddingVertical: 18,
-    borderRadius: 12,
-    alignItems: "center",
-  },
-  confirmButtonText: {
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: "600",
-  },
-
-  // Gender Selection
-  genderOptions: {
-    flexDirection: "row",
-    gap: 20,
-    marginBottom: 40,
-  },
-  genderCard: {
-    flex: 1,
-    backgroundColor: "#1a1a2e",
-    borderRadius: 20,
-    padding: 30,
-    alignItems: "center",
-    borderWidth: 2,
-    borderColor: "transparent",
-  },
-  genderCardActive: {
-    borderColor: "#6c5ce7",
-    backgroundColor: "#252540",
-  },
-  genderEmoji: {
-    fontSize: 60,
-    marginBottom: 12,
-  },
-  genderLabel: {
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: "600",
-  },
-
-  // Analyzing Screen
-  analyzingTitle: {
-    color: "#fff",
-    fontSize: 24,
-    fontWeight: "bold",
-    marginTop: 30,
-    marginBottom: 10,
-  },
-  analyzingSubtitle: {
-    color: "#888",
-    fontSize: 16,
-    textAlign: "center",
-    marginBottom: 40,
-  },
-  analyzingSteps: {
-    backgroundColor: "#1a1a2e",
-    borderRadius: 16,
-    padding: 20,
-    width: "100%",
-    marginBottom: 30,
-  },
-  analyzingStep: {
-    color: "#ccc",
-    fontSize: 14,
-    marginBottom: 12,
-  },
-  analyzingNote: {
-    color: "#666",
-    fontSize: 14,
-  },
-
-  // Analysis Result Screen
-  overallScoreCard: {
-    backgroundColor: "#6c5ce7",
-    borderRadius: 20,
-    padding: 30,
-    alignItems: "center",
-    marginBottom: 24,
-  },
-  overallScoreLabel: {
-    color: "rgba(255,255,255,0.8)",
-    fontSize: 14,
-    marginBottom: 8,
-  },
-  overallScoreValue: {
-    color: "#fff",
-    fontSize: 64,
-    fontWeight: "bold",
-  },
-  overallScoreMax: {
-    color: "rgba(255,255,255,0.6)",
-    fontSize: 20,
-    marginTop: -10,
-  },
-  stylingPotential: {
-    color: "#fff",
-    fontSize: 16,
-    marginTop: 12,
-    backgroundColor: "rgba(0,0,0,0.2)",
-    paddingHorizontal: 16,
-    paddingVertical: 6,
-    borderRadius: 20,
-  },
-  analysisSection: {
-    backgroundColor: "#1a1a2e",
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 16,
-  },
-  analysisSectionTitle: {
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: "600",
-    marginBottom: 16,
-  },
-  propertyRow: {
-    flexDirection: "row",
-    gap: 12,
-    marginBottom: 12,
-  },
-  propertyItem: {
-    flex: 1,
-    backgroundColor: "#252540",
-    borderRadius: 12,
-    padding: 12,
-  },
-  propertyLabel: {
-    color: "#888",
-    fontSize: 12,
-    marginBottom: 4,
-  },
-  propertyValue: {
-    color: "#fff",
-    fontSize: 16,
-    fontWeight: "500",
-    textTransform: "capitalize",
-  },
-  conditionDesc: {
-    color: "#888",
-    fontSize: 14,
-    marginTop: 8,
-  },
-  recommendationItem: {
-    flexDirection: "row",
-    marginBottom: 8,
-  },
-  recommendationBullet: {
-    color: "#6c5ce7",
-    fontSize: 16,
-    marginRight: 8,
-  },
-  recommendationText: {
-    color: "#ccc",
-    fontSize: 14,
-    flex: 1,
-  },
-
-  // Style Selection
-  analysisStatusBanner: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#252540",
-    padding: 12,
+    backgroundColor: "#252530",
     borderRadius: 10,
-    marginBottom: 16,
-    gap: 10,
-  },
-  analysisStatusText: {
-    color: "#888",
-    fontSize: 14,
-  },
-  analysisCompleteBanner: {
-    backgroundColor: "rgba(0, 184, 148, 0.15)",
-    padding: 12,
-    borderRadius: 10,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: "#00b894",
-  },
-  analysisCompleteText: {
-    color: "#00b894",
-    fontSize: 14,
-    textAlign: "center",
-  },
-  sectionLabel: {
-    color: "#fff",
-    fontSize: 16,
-    fontWeight: "600",
-    marginBottom: 12,
-    marginTop: 8,
-  },
-  styleGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
-    marginBottom: 24,
-  },
-  styleChip: {
-    backgroundColor: "#1a1a2e",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: "#333",
-  },
-  styleChipActive: {
-    backgroundColor: "#6c5ce7",
-    borderColor: "#6c5ce7",
-  },
-  styleChipText: {
-    color: "#ccc",
-    fontSize: 14,
-  },
-  styleChipTextActive: {
-    color: "#fff",
-  },
-  urlInput: {
-    backgroundColor: "#1a1a2e",
-    borderRadius: 12,
-    padding: 16,
-    color: "#fff",
-    fontSize: 16,
-    borderWidth: 1,
-    borderColor: "#333",
-    marginBottom: 12,
-  },
-  uploadRefButton: {
-    backgroundColor: "#252540",
-    paddingVertical: 14,
-    borderRadius: 12,
     alignItems: "center",
-    marginBottom: 20,
-  },
-  uploadRefButtonText: {
-    color: "#fff",
-    fontSize: 16,
-  },
-
-  // Length Selection
-  lengthOptions: {
-    gap: 12,
-    marginBottom: 20,
-  },
-  lengthOption: {
-    backgroundColor: "#1a1a2e",
-    borderRadius: 12,
-    padding: 16,
-    borderWidth: 2,
-    borderColor: "transparent",
-  },
-  lengthOptionActive: {
-    borderColor: "#6c5ce7",
-    backgroundColor: "#252540",
-  },
-  lengthLabel: {
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: "600",
-    marginBottom: 4,
-  },
-  lengthLabelActive: {
-    color: "#6c5ce7",
-  },
-  lengthDesc: {
-    color: "#888",
-    fontSize: 14,
-  },
-
-  // Color Selection
-  colorGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 12,
-    marginBottom: 20,
-  },
-  colorOption: {
-    width: (SCREEN_WIDTH - 72) / 4,
-    alignItems: "center",
-    padding: 10,
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: "transparent",
-  },
-  colorOptionActive: {
-    borderColor: "#6c5ce7",
-    backgroundColor: "#252540",
-  },
-  colorSwatch: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    borderWidth: 2,
-    borderColor: "#333",
-    marginBottom: 6,
-  },
-  naturalSwatch: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "#1a1a2e",
-    borderWidth: 2,
-    borderColor: "#333",
     justifyContent: "center",
-    alignItems: "center",
-    marginBottom: 6,
-  },
-  naturalSwatchText: {
-    fontSize: 20,
-  },
-  colorName: {
-    color: "#888",
-    fontSize: 11,
-    textAlign: "center",
-  },
-  colorNameActive: {
-    color: "#fff",
-    fontWeight: "600",
-  },
-
-  // Feasibility Screen
-  assessingContainer: {
-    alignItems: "center",
-    paddingVertical: 60,
-  },
-  assessingText: {
-    color: "#fff",
-    fontSize: 20,
-    marginTop: 20,
     marginBottom: 8,
   },
-  assessingSubtext: {
-    color: "#888",
-    fontSize: 14,
+  stylePreviewIcon: {
+    fontSize: 32,
+    opacity: 0.5,
   },
-  feasibilityHeader: {
-    borderRadius: 20,
-    padding: 24,
-    alignItems: "center",
-    marginBottom: 20,
-  },
-  feasibilityPass: {
-    backgroundColor: "rgba(0, 184, 148, 0.15)",
-    borderWidth: 1,
-    borderColor: "#00b894",
-  },
-  feasibilityFail: {
-    backgroundColor: "rgba(253, 203, 110, 0.15)",
-    borderWidth: 1,
-    borderColor: "#fdcb6e",
-  },
-  feasibilityEmoji: {
-    fontSize: 48,
-    marginBottom: 12,
-  },
-  feasibilityStatus: {
-    color: "#fff",
-    fontSize: 24,
-    fontWeight: "bold",
-    marginBottom: 8,
-  },
-  feasibilityScore: {
-    color: "#888",
-    fontSize: 18,
-  },
-  compatibilitySection: {
-    backgroundColor: "#1a1a2e",
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 16,
-  },
-  compatibilityTitle: {
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: "600",
-    marginBottom: 16,
-  },
-  compatibilityDesc: {
-    color: "#888",
-    fontSize: 13,
-    marginBottom: 16,
-    marginTop: -4,
-  },
-  growthTime: {
-    color: "#fdcb6e",
-    fontSize: 13,
-    marginBottom: 16,
-    marginTop: -8,
-  },
-  salonInfoSection: {
-    flexDirection: "row",
-    gap: 12,
-    marginBottom: 16,
-  },
-  salonInfoItem: {
-    flex: 1,
-    backgroundColor: "#1a1a2e",
-    borderRadius: 12,
-    padding: 16,
-    alignItems: "center",
-  },
-  salonInfoLabel: {
-    color: "#888",
+  styleCardText: {
     fontSize: 12,
-    marginBottom: 6,
+    color: "#888",
+    textAlign: "center",
+    lineHeight: 16,
   },
-  salonInfoValue: {
+  styleCardTextActive: {
     color: "#fff",
-    fontSize: 18,
     fontWeight: "600",
-    textTransform: "capitalize",
   },
-  concernsSection: {
-    backgroundColor: "rgba(253, 203, 110, 0.1)",
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
+  styleCardCheck: {
+    position: "absolute",
+    top: 8,
+    right: 8,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: "#7c5cff",
+    alignItems: "center",
+    justifyContent: "center",
   },
-  concernsTitle: {
-    color: "#fdcb6e",
-    fontSize: 16,
-    fontWeight: "600",
-    marginBottom: 12,
-  },
-  concernItem: {
-    color: "#ccc",
-    fontSize: 14,
-    marginBottom: 6,
-  },
-  suggestionsSection: {
-    backgroundColor: "rgba(0, 184, 148, 0.1)",
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-  },
-  suggestionsTitle: {
-    color: "#00b894",
-    fontSize: 16,
-    fontWeight: "600",
-    marginBottom: 12,
-  },
-  suggestionItem: {
-    color: "#ccc",
-    fontSize: 14,
-    marginBottom: 6,
-  },
-  notesSection: {
-    backgroundColor: "#1a1a2e",
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 20,
-  },
-  notesTitle: {
+  checkMarkSmall: {
     color: "#fff",
-    fontSize: 16,
-    fontWeight: "600",
-    marginBottom: 8,
-  },
-  notesText: {
-    color: "#ccc",
-    fontSize: 14,
-    lineHeight: 22,
+    fontSize: 12,
+    fontWeight: "bold",
   },
   generateButton: {
-    backgroundColor: "#6c5ce7",
-    paddingVertical: 20,
+    backgroundColor: "#7c5cff",
+    marginHorizontal: 16,
+    marginVertical: 16,
+    paddingVertical: 18,
     borderRadius: 16,
     alignItems: "center",
-    marginTop: 10,
   },
   generateButtonText: {
     color: "#fff",
-    fontSize: 20,
-    fontWeight: "bold",
-  },
-  generateButtonNote: {
-    color: "rgba(255,255,255,0.7)",
-    fontSize: 14,
-    marginTop: 6,
-  },
-  notFeasibleActions: {
-    gap: 12,
-    marginTop: 10,
-  },
-  modifyStyleButton: {
-    backgroundColor: "#1a1a2e",
-    paddingVertical: 16,
-    borderRadius: 12,
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#333",
-  },
-  modifyStyleText: {
-    color: "#fff",
-    fontSize: 16,
-  },
-  generateAnywayButton: {
-    backgroundColor: "#fdcb6e",
+    fontSize: 18,
+    fontWeight: "700",
   },
 
-  // Generating Screen
-  generatingEmoji: {
-    fontSize: 80,
-    marginBottom: 20,
+  // Reference Upload Screen
+  refUploadContent: {
+    flexGrow: 1,
+    padding: 24,
+    paddingTop: 16,
   },
-  generatingTitle: {
-    color: "#fff",
-    fontSize: 28,
-    fontWeight: "bold",
-    marginBottom: 10,
-  },
-  generatingSubtitle: {
-    color: "#888",
-    fontSize: 16,
-    marginBottom: 40,
-    textAlign: "center",
-  },
-  generatingProgressContainer: {
-    width: "100%",
-    marginBottom: 30,
-  },
-  generatingProgressBar: {
-    height: 8,
-    backgroundColor: "#1a1a2e",
-    borderRadius: 4,
-    overflow: "hidden",
-    marginBottom: 10,
-  },
-  generatingProgressFill: {
-    height: "100%",
-    backgroundColor: "#6c5ce7",
-    borderRadius: 4,
-  },
-  generatingProgressText: {
-    color: "#6c5ce7",
-    fontSize: 18,
-    fontWeight: "bold",
-    textAlign: "center",
-  },
-  generatingSteps: {
-    backgroundColor: "#1a1a2e",
-    borderRadius: 16,
-    padding: 20,
-    width: "100%",
-    marginBottom: 30,
-  },
-  generatingStep: {
-    color: "#888",
-    fontSize: 14,
-    marginBottom: 10,
-  },
-  generatingStepDone: {
-    color: "#00b894",
-  },
-  generatingStepActive: {
-    color: "#6c5ce7",
-  },
-  generatingStepNote: {
-    color: "#666",
-    fontSize: 12,
-    marginTop: 4,
-    fontStyle: "italic",
-  },
-  patienceBox: {
-    backgroundColor: "#252540",
-    borderRadius: 16,
-    padding: 20,
-    alignItems: "center",
-    width: "100%",
-  },
-  patienceEmoji: {
-    fontSize: 32,
-    marginBottom: 10,
-  },
-  patienceTitle: {
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: "600",
-    marginBottom: 8,
-  },
-  patienceText: {
-    color: "#888",
-    fontSize: 14,
-    textAlign: "center",
-    lineHeight: 22,
-  },
-
-  // Result Screen
-  resultTitle: {
-    color: "#fff",
-    fontSize: 28,
-    fontWeight: "bold",
-    textAlign: "center",
-    marginBottom: 8,
-  },
-  resultSubtitle: {
-    color: "#888",
-    fontSize: 14,
-    textAlign: "center",
+  refImageSection: {
+    marginTop: 16,
     marginBottom: 24,
   },
-  comparisonRow: {
-    backgroundColor: "#1a1a2e",
+  refPreviewContainer: {
+    position: "relative",
     borderRadius: 16,
-    padding: 16,
-    marginBottom: 16,
+    overflow: "hidden",
   },
-  comparisonRowTitle: {
-    color: "#fff",
-    fontSize: 16,
-    fontWeight: "600",
-    marginBottom: 12,
-    textAlign: "center",
+  refPreviewImage: {
+    width: "100%",
+    aspectRatio: 1,
+    borderRadius: 16,
   },
-  comparisonImages: {
-    flexDirection: "row",
+  refRemoveBtn: {
+    position: "absolute",
+    top: 12,
+    right: 12,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "rgba(0,0,0,0.6)",
     alignItems: "center",
     justifyContent: "center",
   },
-  comparisonImageBox: {
-    flex: 1,
-    alignItems: "center",
-  },
-  comparisonImageLabel: {
-    color: "#888",
-    fontSize: 12,
-    marginBottom: 8,
-    textTransform: "uppercase",
-    letterSpacing: 1,
-  },
-  comparisonImage: {
-    width: "100%",
-    aspectRatio: 0.75,
-    borderRadius: 12,
-  },
-  comparisonArrow: {
-    paddingHorizontal: 12,
-  },
-  arrowText: {
-    color: "#6c5ce7",
-    fontSize: 24,
-    fontWeight: "bold",
-  },
-  // Legacy styles (kept for compatibility)
-  comparisonSection: {
-    marginBottom: 24,
-  },
-  comparisonLabel: {
-    color: "#888",
-    fontSize: 14,
-    marginBottom: 12,
-  },
-  originalPhotos: {
-    flexDirection: "row",
-    gap: 12,
-  },
-  comparisonSmall: {
-    flex: 1,
-    height: 100,
-    borderRadius: 12,
-  },
-  generatedLabel: {
+  refRemoveText: {
     color: "#fff",
     fontSize: 18,
+    fontWeight: "bold",
+  },
+  refAnalyzingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.7)",
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 16,
+  },
+  refAnalyzingText: {
+    color: "#fff",
+    fontSize: 16,
+    marginTop: 12,
+  },
+  refDescriptionBox: {
+    backgroundColor: "#1a1a24",
+    padding: 16,
+    borderRadius: 12,
+    marginTop: 12,
+  },
+  refDescriptionLabel: {
+    fontSize: 12,
+    color: "#7c5cff",
     fontWeight: "600",
+    marginBottom: 6,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  refDescriptionText: {
+    fontSize: 14,
+    color: "#ccc",
+    lineHeight: 22,
+  },
+  refUploadCard: {
+    backgroundColor: "#1a1a24",
+    borderRadius: 16,
+    padding: 40,
+    alignItems: "center",
+    borderWidth: 2,
+    borderColor: "#252530",
+    borderStyle: "dashed",
+  },
+  refUploadIcon: {
+    fontSize: 48,
     marginBottom: 12,
   },
-  resultGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 12,
-    marginBottom: 24,
-  },
-  resultImageContainer: {
-    width: (SCREEN_WIDTH - 52) / 2,
-  },
-  resultImage: {
-    width: "100%",
-    aspectRatio: 0.75,
-    borderRadius: 12,
-  },
-  resultImageLabel: {
+  refUploadText: {
+    fontSize: 16,
     color: "#888",
-    fontSize: 12,
-    textAlign: "center",
-    marginTop: 6,
   },
-  resultActions: {
-    flexDirection: "row",
-    gap: 12,
-    marginBottom: 20,
-  },
-  tryAnotherButton: {
-    flex: 1,
-    backgroundColor: "#1a1a2e",
-    paddingVertical: 16,
-    borderRadius: 12,
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#333",
-  },
-  tryAnotherText: {
-    color: "#fff",
-    fontSize: 16,
-  },
-  newClientButton: {
-    flex: 1,
-    backgroundColor: "#6c5ce7",
-    paddingVertical: 16,
-    borderRadius: 12,
-    alignItems: "center",
-  },
-  newClientText: {
-    color: "#fff",
-    fontSize: 16,
-    fontWeight: "600",
-  },
-  disclaimer: {
-    color: "#666",
+  orDivider: {
     fontSize: 13,
+    color: "#444",
     textAlign: "center",
+    marginVertical: 20,
+  },
+  urlInput: {
+    backgroundColor: "#1a1a24",
+    borderRadius: 12,
+    padding: 16,
+    color: "#fff",
+    fontSize: 15,
+    borderWidth: 1,
+    borderColor: "#252530",
+  },
+  warningBox: {
+    flexDirection: "row",
+    backgroundColor: "rgba(255, 193, 7, 0.1)",
+    borderRadius: 14,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255, 193, 7, 0.3)",
+  },
+  warningIcon: {
+    fontSize: 24,
+    marginRight: 12,
+  },
+  warningContent: {
+    flex: 1,
+  },
+  warningTitle: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#ffc107",
+    marginBottom: 8,
+  },
+  warningText: {
+    fontSize: 13,
+    color: "#bbb",
     lineHeight: 20,
   },
 
-  // Common
-  primaryButton: {
-    backgroundColor: "#6c5ce7",
-    paddingVertical: 16,
-    paddingHorizontal: 32,
-    borderRadius: 12,
-    marginTop: 20,
+  // Generating Screen
+  generatingContent: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 32,
   },
-  buttonText: {
+  generatingIconContainer: {
+    marginBottom: 24,
+  },
+  generatingIcon: {
+    fontSize: 72,
+  },
+  generatingTitle: {
+    fontSize: 28,
+    fontWeight: "800",
     color: "#fff",
+    marginBottom: 8,
+  },
+  generatingSubtitle: {
     fontSize: 16,
+    color: "#888",
+    marginBottom: 40,
+    textAlign: "center",
+  },
+  progressContainer: {
+    width: "100%",
+    marginBottom: 24,
+  },
+  progressBar: {
+    height: 8,
+    backgroundColor: "#1a1a24",
+    borderRadius: 4,
+    overflow: "hidden",
+    marginBottom: 8,
+  },
+  progressFill: {
+    height: "100%",
+    backgroundColor: "#7c5cff",
+    borderRadius: 4,
+  },
+  progressText: {
+    fontSize: 16,
+    color: "#7c5cff",
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  timeEstimate: {
+    alignItems: "center",
+    marginBottom: 40,
+  },
+  timeEstimateLabel: {
+    fontSize: 13,
+    color: "#666",
+    marginBottom: 4,
+  },
+  timeEstimateValue: {
+    fontSize: 18,
+    color: "#fff",
     fontWeight: "600",
   },
-  permissionText: {
+  funFactBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#1a1a24",
+    borderRadius: 14,
+    padding: 16,
+    width: "100%",
+  },
+  funFactIcon: {
+    fontSize: 24,
+    marginRight: 12,
+  },
+  funFactText: {
+    flex: 1,
+    fontSize: 14,
+    color: "#888",
+    lineHeight: 20,
+  },
+
+  // Result Screen
+  resultContainer: {
+    flex: 1,
+    backgroundColor: "#0a0a0f",
+  },
+  resultHeader: {
+    alignItems: "center",
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: "#1a1a24",
+  },
+  resultTitle: {
+    fontSize: 22,
+    fontWeight: "800",
     color: "#fff",
+  },
+  comparisonContainer: {
+    flex: 1,
+    padding: 16,
+  },
+  comparisonImageWrapper: {
+    flex: 1,
+    borderRadius: 16,
+    overflow: "hidden",
+    backgroundColor: "#1a1a24",
+  },
+  comparisonLabel: {
+    position: "absolute",
+    top: 16,
+    left: 16,
+    backgroundColor: "rgba(0,0,0,0.85)",
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 25,
+    zIndex: 10,
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "800",
+    letterSpacing: 2,
+    overflow: "hidden",
+  },
+  comparisonImageFull: {
+    width: "100%",
+    height: "100%",
+  },
+  comparisonDivider: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 8,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: "#252530",
+  },
+  dividerIcon: {
+    fontSize: 20,
+    color: "#7c5cff",
+    marginHorizontal: 12,
+  },
+  resultActions: {
+    flexDirection: "row",
+    padding: 16,
+    gap: 12,
+  },
+  resultActionBtn: {
+    flex: 1,
+    backgroundColor: "#1a1a24",
+    paddingVertical: 16,
+    borderRadius: 14,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#252530",
+  },
+  resultActionBtnPrimary: {
+    backgroundColor: "#7c5cff",
+    borderColor: "#7c5cff",
+  },
+  resultActionText: {
+    fontSize: 16,
+    color: "#fff",
+    fontWeight: "600",
+  },
+  resultActionTextPrimary: {
+    fontSize: 16,
+    color: "#fff",
+    fontWeight: "700",
+  },
+
+  // Common
+  centerContent: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 24,
+  },
+  permissionText: {
     fontSize: 18,
+    color: "#fff",
     textAlign: "center",
-    marginBottom: 10,
+    marginBottom: 24,
   },
 });
