@@ -101,13 +101,21 @@ export const generateHairstyle = async (
     // Build prompt - Kling models need @Image1 syntax to reference input images
     let prompt = styleDescription;
     if (usesImageReferenceSyntax) {
-      // For Kling: "@Image1 with [hairstyle description]"
+      // For Kling: Use @Image1, @Image2 reference syntax
       if (referenceImageUrl) {
         // With reference image: apply ref style to user's photo
-        prompt = `Apply the hairstyle from @Image2 to the person in @Image1. ${styleDescription}`;
+        prompt = `Transform @Image1 by applying the exact hairstyle shown in @Image2. 
+
+${styleDescription}
+
+CRITICAL: The person in @Image1 must remain completely identical - same face, features, expression, skin, body, background. ONLY replace the hair with the style from @Image2.`;
       } else {
         // Without reference: just modify @Image1
-        prompt = `@Image1 with ${styleDescription}`;
+        prompt = `Transform the hair in @Image1 while keeping everything else identical.
+
+${styleDescription}
+
+CRITICAL: The person must remain completely identical - same face, features, expression, skin, body, background. ONLY the hair should change.`;
       }
     }
 
