@@ -341,11 +341,33 @@ OUTPUT: Single photorealistic image showing only the new hairstyle applied natur
         setGenerationProgress((prev) => Math.min(prev + 1, 95));
       }, 700);
 
+      // For ref image: use base64 data URL if available (uploaded), otherwise use URI (pasted URL)
+      let refImageForApi: string | undefined;
+      if (flowType === "ref" && refImage) {
+        console.log("=== REF IMAGE FOR GENERATION ===");
+        console.log("refImage.uri:", refImage.uri?.substring(0, 50) + "...");
+        console.log("refImage.base64 exists:", !!refImage.base64);
+        console.log("refImage.base64 length:", refImage.base64?.length || 0);
+        
+        if (refImage.base64) {
+          // Uploaded image - convert base64 to data URL
+          refImageForApi = refImage.base64.startsWith("data:")
+            ? refImage.base64
+            : `data:image/jpeg;base64,${refImage.base64}`;
+          console.log("Using base64 data URL for ref image");
+        } else if (refImage.uri.startsWith("http")) {
+          // Pasted URL - use directly
+          refImageForApi = refImage.uri;
+          console.log("Using URL for ref image:", refImageForApi);
+        }
+        console.log("refImageForApi length:", refImageForApi?.length || 0);
+      }
+
       const result = await generateHairstyle(
         userPhoto.base64,
         styleDescription,
         gender,
-        flowType === "ref" && refImage?.uri ? refImage.uri : undefined
+        refImageForApi
       );
 
       clearInterval(progressInterval2);

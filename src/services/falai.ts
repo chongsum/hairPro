@@ -138,8 +138,14 @@ CRITICAL: The person must remain completely identical - same face, features, exp
       ? [imageUrl, referenceImageUrl]
       : [imageUrl];
 
-    console.log("Image URL length:", imageUrl.length);
-    console.log("Image URLs array length:", imageUrls.length);
+    console.log("User image (Image1) length:", imageUrl.length);
+    console.log("Reference image (Image2) provided:", !!referenceImageUrl);
+    if (referenceImageUrl) {
+      console.log("Reference image type:", referenceImageUrl.startsWith("data:") ? "base64 data URL" : "URL");
+      console.log("Reference image length:", referenceImageUrl.length);
+      console.log("Reference image preview:", referenceImageUrl.substring(0, 100) + "...");
+    }
+    console.log("Total images being sent:", imageUrls.length);
 
     // Build input based on model type
     const input = usesImageUrlsArray
