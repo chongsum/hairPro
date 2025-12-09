@@ -1135,7 +1135,9 @@ export default function App() {
                 style={styles.styleModelSelector}
                 onPress={() => setShowModelSelector(true)}
               >
-                <Text style={styles.styleModelLabel}>{t("model", language)}:</Text>
+                <Text style={styles.styleModelLabel}>
+                  {t("model", language)}:
+                </Text>
                 <Text style={styles.styleModelName}>{selectedModel.name}</Text>
                 <Text style={styles.styleModelIcon}>▼</Text>
               </TouchableOpacity>
@@ -1411,8 +1413,12 @@ export default function App() {
                   style={styles.styleModelSelector}
                   onPress={() => setShowModelSelector(true)}
                 >
-                  <Text style={styles.styleModelLabel}>{t("model", language)}:</Text>
-                  <Text style={styles.styleModelName}>{selectedModel.name}</Text>
+                  <Text style={styles.styleModelLabel}>
+                    {t("model", language)}:
+                  </Text>
+                  <Text style={styles.styleModelName}>
+                    {selectedModel.name}
+                  </Text>
                   <Text style={styles.styleModelIcon}>▼</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
