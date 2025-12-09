@@ -45,10 +45,7 @@ Return ONLY this JSON (no other text):
   "hairDensity": {"value": "<thin|medium|thick>"},
   "faceShape": {"value": "<oval|round|square|heart|oblong|diamond>"},
   "hairLength": {"value": "<very short|short|medium|long|very long>"},
-  "hairColor": {"value": "<brief color description>"},
-  "hairCondition": {"value": "<excellent|good|fair|needs care>", "score": <1-4>},
-  "overallScore": <50-100>,
-  "stylingPotential": "<high|medium|low>"
+  "hairColor": {"value": "<brief color description>"}
 }`;
 
 // ============================================================
@@ -118,10 +115,14 @@ HAIR REQUIREMENTS:
 - Realistic hair texture with individual strand detail and natural shine
 - Seamless blend at hairline, temples, and nape
 - Style must be practically achievable by a professional hairstylist
-${userHairAnalysis ? `- Consider: ${userHairAnalysis}` : ""}
+${
+  userHairAnalysis
+    ? `- ADAPT the hairstyle to work naturally with this person's hair: ${userHairAnalysis}`
+    : ""
+}
 
 STRICT PRESERVATION (DO NOT MODIFY):
-- Face: Keep exact facial features, skin tone, expression, makeup unchanged
+- Face: Keep exact facial features, skin tone and color, expression, makeup unchanged
 - No face enhancement, beautification, smoothing, or reshaping
 - Eyes, eyebrows, nose, ears, lips must remain identical to original
 - Body, clothing, jewelry, accessories unchanged

@@ -113,18 +113,30 @@ export const generateHairstyle = async (
       console.log("Input: Array format (image_urls)");
     }
 
-    // Call Fal AI
+    // Call Fal AI with timeout
     let hasLoggedProgress = false;
-    const result = (await fal.subscribe(model.endpoint, {
+    let lastStatus = "";
+    
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error("Generation timed out after 3 minutes")), 180000);
+    });
+    
+    const generatePromise = fal.subscribe(model.endpoint, {
       input,
-      logs: false,
+      logs: true,
       onQueueUpdate: (update) => {
+        if (update.status !== lastStatus) {
+          console.log("Queue status:", update.status);
+          lastStatus = update.status;
+        }
         if (update.status === "IN_PROGRESS" && !hasLoggedProgress) {
           console.log("Generation in progress...");
           hasLoggedProgress = true;
         }
       },
-    })) as { data: FalImageResult };
+    }) as Promise<{ data: FalImageResult }>;
+    
+    const result = await Promise.race([generatePromise, timeoutPromise]);
 
     console.log("=== FAL AI: RESPONSE RECEIVED ===");
 

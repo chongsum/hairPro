@@ -13,6 +13,8 @@ export interface HistoryItem {
   color: string;
   flowType: "style" | "ref";
   refImageUri?: string;
+  modelId?: string; // Which AI model was used
+  modelName?: string; // Display name of the model
   createdAt: number;
 }
 
@@ -56,7 +58,9 @@ export const saveToHistory = async (
   gender: string,
   color: string,
   flowType: "style" | "ref",
-  refImageUri?: string
+  refImageUri?: string,
+  modelId?: string,
+  modelName?: string
 ): Promise<HistoryItem> => {
   try {
     await ensureHistoryDir();
@@ -91,6 +95,8 @@ export const saveToHistory = async (
       color,
       flowType,
       refImageUri,
+      modelId,
+      modelName,
       createdAt: Date.now(),
     };
 

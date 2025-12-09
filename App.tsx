@@ -82,6 +82,9 @@ export default function App() {
   );
   const [showModelSelector, setShowModelSelector] = useState(false);
 
+  // Hair analysis toggle
+  const [hairAnalysisEnabled, setHairAnalysisEnabled] = useState(true);
+
   // User preferences
   const [gender, setGender] = useState<Gender>("male");
 
@@ -97,6 +100,9 @@ export default function App() {
 
   // Analysis states
   const [hairAnalysis, setHairAnalysis] = useState<HairAnalysis | null>(null);
+  const [cachedAnalysisUri, setCachedAnalysisUri] = useState<string | null>(
+    null
+  ); // Track which photo the analysis belongs to
 
   // Style selection states
   const [selectedStyle, setSelectedStyle] = useState<string>("");
@@ -167,6 +173,7 @@ export default function App() {
     setRefAnalysisFailed(false);
     setRefUrlInput("");
     setHairAnalysis(null);
+    setCachedAnalysisUri(null);
     setSelectedStyle("");
     setSelectedColor("natural");
     setSelectedLengthFilter("all");
@@ -325,24 +332,41 @@ export default function App() {
 
     try {
       // Step 1: Analyze hair (0-30%)
-      setGenerationStep("Analyzing your hair characteristics...");
-      const progressInterval1 = setInterval(() => {
-        setGenerationProgress((prev) => Math.min(prev + 1, 30));
-      }, 600);
-
       let analysis: HairAnalysis | null = null;
-      try {
-        analysis = await analyzeHair(
-          userPhoto.base64,
-          userPhoto.base64,
-          gender
-        );
-        setHairAnalysis(analysis);
-      } catch (err) {
-        console.error("Hair analysis failed:", err);
+
+      if (hairAnalysisEnabled) {
+        // Check if we have a cached analysis for the same photo
+        if (userPhoto.uri === cachedAnalysisUri && hairAnalysis) {
+          console.log("=== USING CACHED HAIR ANALYSIS ===");
+          analysis = hairAnalysis;
+          setGenerationStep("Using cached hair analysis...");
+          setGenerationProgress(30);
+        } else {
+          setGenerationStep("Analyzing your hair characteristics...");
+          const progressInterval1 = setInterval(() => {
+            setGenerationProgress((prev) => Math.min(prev + 1, 30));
+          }, 600);
+
+          try {
+            analysis = await analyzeHair(
+              userPhoto.base64,
+              userPhoto.base64,
+              gender
+            );
+            setHairAnalysis(analysis);
+            setCachedAnalysisUri(userPhoto.uri); // Cache the URI for future use
+          } catch (err) {
+            console.error("Hair analysis failed:", err);
+          }
+
+          clearInterval(progressInterval1);
+        }
+      } else {
+        // Skip analysis, quickly progress to 30%
+        setGenerationStep("Preparing your photo...");
+        await new Promise((resolve) => setTimeout(resolve, 500));
       }
 
-      clearInterval(progressInterval1);
       setGenerationProgress(30);
 
       // Step 2: Build prompt and generate (30-95%)
@@ -371,7 +395,7 @@ export default function App() {
         HAIR_COLORS.find((c) => c.id === selectedColor)?.name || "Natural";
 
       // Build user hair analysis string
-      let userHairAnalysis = "No hair analysis available";
+      let userHairAnalysis = "";
       if (analysis) {
         userHairAnalysis = `Hair texture: ${analysis.hairTexture.value}, Density: ${analysis.hairDensity.value}, Face shape: ${analysis.faceShape.value}`;
       }
@@ -419,7 +443,9 @@ export default function App() {
           gender,
           selectedColor,
           flowType,
-          flowType === "ref" ? refImage?.uri : undefined
+          flowType === "ref" ? refImage?.uri : undefined,
+          selectedModel.id,
+          selectedModel.name
         );
         setHistoryItems((prev) => [historyItem, ...prev]);
       } catch (historyError) {
@@ -446,6 +472,9 @@ export default function App() {
     refImage,
     refImageDescription,
     selectedModel,
+    hairAnalysisEnabled,
+    cachedAnalysisUri,
+    hairAnalysis,
   ]);
 
   // ============ SCREENS ============
@@ -652,6 +681,33 @@ export default function App() {
               {t("aiModel", language)}
             </Text>
             <Text style={styles.modelSelectorValue}>{selectedModel.name}</Text>
+          </TouchableOpacity>
+
+          {/* Hair Analysis Toggle */}
+          <TouchableOpacity
+            style={styles.settingsToggleButton}
+            onPress={() => setHairAnalysisEnabled(!hairAnalysisEnabled)}
+          >
+            <View style={styles.settingsToggleContent}>
+              <Text style={styles.settingsToggleLabel}>
+                {language === "en" ? "Hair Analysis" : "髮質分析"}
+              </Text>
+              <Text style={styles.settingsToggleDesc}>
+                {language === "en"
+                  ? "Analyze hair texture & face shape"
+                  : "分析髮質和臉型"}
+              </Text>
+            </View>
+            <View
+              style={[
+                styles.settingsToggleSwitch,
+                hairAnalysisEnabled && styles.settingsToggleSwitchOn,
+              ]}
+            >
+              <Text style={styles.settingsToggleSwitchText}>
+                {hairAnalysisEnabled ? "ON" : "OFF"}
+              </Text>
+            </View>
           </TouchableOpacity>
         </ScrollView>
       </SafeAreaView>
@@ -1305,76 +1361,185 @@ export default function App() {
 
   // RESULT SCREEN
   if (screen === "result") {
+    // Get all history items for the same hairstyle + original photo (model comparison)
+    const currentStyleName =
+      flowType === "ref" ? "Reference Style" : selectedStyle;
+    const sameStyleResults = historyItems.filter(
+      (item) =>
+        item.styleName === currentStyleName &&
+        item.originalPhotoUri === userPhoto?.uri
+    );
+
     return (
       <SafeAreaView style={styles.resultContainer}>
         <StatusBar style="light" />
 
-        <View style={styles.resultHeader}>
-          <Text style={styles.resultTitle}>{t("yourNewLook", language)}</Text>
-        </View>
-
-        <View style={styles.comparisonContainer}>
-          <View style={styles.comparisonImageWrapper}>
-            <Text style={styles.comparisonLabel}>{t("before", language)}</Text>
-            {userPhoto && (
-              <Image
-                source={{ uri: userPhoto.uri }}
-                style={styles.comparisonImageFull}
-                resizeMode="contain"
-              />
-            )}
-          </View>
-
-          <View style={styles.comparisonDivider}>
-            <View style={styles.dividerLine} />
-            <Text style={styles.dividerIcon}>↓</Text>
-            <View style={styles.dividerLine} />
-          </View>
-
-          <View style={styles.comparisonImageWrapper}>
-            <Text style={styles.comparisonLabel}>{t("after", language)}</Text>
-            {generatedImage && (
-              <Image
-                source={{ uri: generatedImage }}
-                style={styles.comparisonImageFull}
-                resizeMode="contain"
-              />
-            )}
-          </View>
-        </View>
-
-        <View style={styles.resultActions}>
-          <TouchableOpacity
-            style={styles.resultActionBtn}
-            onPress={() => {
-              setSelectedStyle("");
-              setGeneratedImage(null);
-              setScreen(flowType === "style" ? "styleSelect" : "refUpload");
-            }}
-          >
-            <Text style={styles.resultActionText}>
-              {t("tryAnother", language)}
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.resultActionBtn, styles.resultActionBtnPrimary]}
-            onPress={resetApp}
-          >
-            <Text style={styles.resultActionTextPrimary}>
-              {t("startOver", language)}
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        <TouchableOpacity
-          style={styles.historyLinkBtn}
-          onPress={() => setScreen("history")}
+        {/* Model Selector Modal */}
+        <Modal
+          visible={showModelSelector}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setShowModelSelector(false)}
         >
-          <Text style={styles.historyLinkText}>
-            {t("viewHistory", language)} ({historyItems.length})
-          </Text>
-        </TouchableOpacity>
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>
+                  {t("selectModel", language)}
+                </Text>
+                <TouchableOpacity
+                  style={styles.modalCloseBtn}
+                  onPress={() => setShowModelSelector(false)}
+                >
+                  <Text style={styles.modalCloseText}>✕</Text>
+                </TouchableOpacity>
+              </View>
+              <ScrollView style={styles.modelList}>
+                {SUPPORTED_MODELS.map((model) => (
+                  <TouchableOpacity
+                    key={model.id}
+                    style={[
+                      styles.modelItem,
+                      selectedModel.id === model.id && styles.modelItemActive,
+                    ]}
+                    onPress={() => {
+                      setSelectedModel(model);
+                      setShowModelSelector(false);
+                    }}
+                  >
+                    <View style={styles.modelItemContent}>
+                      <Text style={styles.modelItemName}>{model.name}</Text>
+                      <Text style={styles.modelItemDesc}>
+                        {model.description[language]}
+                      </Text>
+                      <Text style={styles.modelItemEndpoint}>
+                        {model.endpoint}
+                      </Text>
+                    </View>
+                    {selectedModel.id === model.id && (
+                      <View style={styles.modelItemCheck}>
+                        <Text style={styles.modelItemCheckText}>✓</Text>
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          </View>
+        </Modal>
+
+        <ScrollView contentContainerStyle={styles.resultScrollContent}>
+          <View style={styles.resultHeader}>
+            <Text style={styles.resultTitle}>{t("yourNewLook", language)}</Text>
+            <Text style={styles.resultSubtitle}>{currentStyleName}</Text>
+          </View>
+
+          {/* Original Photo */}
+          <View style={styles.comparisonContainer}>
+            <View style={styles.comparisonImageWrapper}>
+              <Text style={styles.comparisonLabel}>
+                {t("before", language)}
+              </Text>
+              {userPhoto && (
+                <Image
+                  source={{ uri: userPhoto.uri }}
+                  style={styles.comparisonImageFull}
+                  resizeMode="cover"
+                />
+              )}
+            </View>
+          </View>
+
+          {/* Model Comparison Section */}
+          <View style={styles.modelComparisonSection}>
+            <Text style={styles.modelComparisonTitle}>
+              {t("generatedResults", language)}
+            </Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.modelComparisonScroll}
+            >
+              {sameStyleResults.map((item) => (
+                <View key={item.id} style={styles.modelResultCard}>
+                  <Image
+                    source={{ uri: item.imageUri }}
+                    style={styles.modelResultImage}
+                    resizeMode="cover"
+                  />
+                  <View style={styles.modelBadge}>
+                    <Text style={styles.modelBadgeText}>
+                      {item.modelName || "Unknown"}
+                    </Text>
+                  </View>
+                </View>
+              ))}
+            </ScrollView>
+            {sameStyleResults.length > 1 && (
+              <Text style={styles.modelComparisonHint}>
+                {t("swipeToCompare", language)}
+              </Text>
+            )}
+          </View>
+
+          {/* Model Switch Section */}
+          <View style={styles.modelSwitchSection}>
+            <Text style={styles.modelSwitchLabel}>
+              {t("tryWithDifferentModel", language)}
+            </Text>
+            <TouchableOpacity
+              style={styles.modelSwitchButton}
+              onPress={() => setShowModelSelector(true)}
+            >
+              <Text style={styles.modelSwitchButtonText}>
+                {selectedModel.name}
+              </Text>
+              <Text style={styles.modelSwitchButtonIcon}>▼</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.regenerateButton}
+              onPress={generateImages}
+              disabled={isGenerating}
+            >
+              <Text style={styles.regenerateButtonText}>
+                {t("generateWithModel", language)}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.resultActions}>
+            <TouchableOpacity
+              style={styles.resultActionBtn}
+              onPress={() => {
+                setSelectedStyle("");
+                setGeneratedImage(null);
+                setScreen(flowType === "style" ? "styleSelect" : "refUpload");
+              }}
+            >
+              <Text style={styles.resultActionText}>
+                {t("tryAnother", language)}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.resultActionBtn, styles.resultActionBtnPrimary]}
+              onPress={resetApp}
+            >
+              <Text style={styles.resultActionTextPrimary}>
+                {t("startOver", language)}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          <TouchableOpacity
+            style={styles.historyLinkBtn}
+            onPress={() => setScreen("history")}
+          >
+            <Text style={styles.historyLinkText}>
+              {t("viewHistory", language)} ({historyItems.length})
+            </Text>
+          </TouchableOpacity>
+        </ScrollView>
       </SafeAreaView>
     );
   }
@@ -1489,11 +1654,20 @@ export default function App() {
                     <Text style={styles.historyCardDate}>
                       {new Date(item.createdAt).toLocaleDateString()}
                     </Text>
-                    {item.flowType === "ref" && (
-                      <View style={styles.historyRefBadge}>
-                        <Text style={styles.historyRefBadgeText}>REF</Text>
-                      </View>
-                    )}
+                    <View style={styles.historyBadgeRow}>
+                      {item.modelName && (
+                        <View style={styles.historyModelBadge}>
+                          <Text style={styles.historyModelBadgeText}>
+                            {item.modelName}
+                          </Text>
+                        </View>
+                      )}
+                      {item.flowType === "ref" && (
+                        <View style={styles.historyRefBadge}>
+                          <Text style={styles.historyRefBadgeText}>REF</Text>
+                        </View>
+                      )}
+                    </View>
                   </View>
                 </TouchableOpacity>
               )}
@@ -1584,6 +1758,17 @@ export default function App() {
                 ? t("referenceImage", language)
                 : t("styleSelection", language)}
             </Text>
+
+            {selectedHistoryItem.modelName && (
+              <>
+                <Text style={styles.historyDetailLabel}>
+                  {t("model", language)}
+                </Text>
+                <Text style={styles.historyDetailValue}>
+                  {selectedHistoryItem.modelName}
+                </Text>
+              </>
+            )}
           </View>
 
           {/* Actions */}
@@ -2234,6 +2419,7 @@ const styles = StyleSheet.create({
 
   // Result
   resultContainer: { flex: 1, backgroundColor: "#0a0a0f" },
+  resultScrollContent: { paddingBottom: 32 },
   resultHeader: {
     alignItems: "center",
     paddingVertical: 16,
@@ -2241,14 +2427,17 @@ const styles = StyleSheet.create({
     borderBottomColor: "#1a1a24",
   },
   resultTitle: { fontSize: 22, fontWeight: "800", color: "#fff" },
-  comparisonContainer: { flex: 1, padding: 16 },
+  resultSubtitle: {
+    fontSize: 14,
+    color: "#7c5cff",
+    marginTop: 4,
+    fontWeight: "600",
+  },
+  comparisonContainer: { padding: 16 },
   comparisonImageWrapper: {
-    flex: 1,
     borderRadius: 16,
     overflow: "hidden",
     backgroundColor: "#1a1a24",
-    justifyContent: "center",
-    alignItems: "center",
   },
   comparisonLabel: {
     position: "absolute",
@@ -2265,7 +2454,7 @@ const styles = StyleSheet.create({
     letterSpacing: 2,
     overflow: "hidden",
   },
-  comparisonImageFull: { width: "100%", height: "100%" },
+  comparisonImageFull: { width: "100%", aspectRatio: 3 / 4 },
   comparisonDivider: {
     flexDirection: "row",
     alignItems: "center",
@@ -2274,6 +2463,99 @@ const styles = StyleSheet.create({
   },
   dividerLine: { flex: 1, height: 1, backgroundColor: "#252530" },
   dividerIcon: { fontSize: 20, color: "#7c5cff", marginHorizontal: 12 },
+  // Model comparison styles
+  modelComparisonSection: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 16,
+  },
+  modelComparisonTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#fff",
+    marginBottom: 12,
+  },
+  modelComparisonScroll: {
+    gap: 12,
+    paddingRight: 16,
+  },
+  modelResultCard: {
+    width: SCREEN_WIDTH * 0.7,
+    borderRadius: 16,
+    overflow: "hidden",
+    backgroundColor: "#1a1a24",
+    position: "relative",
+  },
+  modelResultImage: {
+    width: "100%",
+    aspectRatio: 3 / 4,
+  },
+  modelBadge: {
+    position: "absolute",
+    bottom: 12,
+    left: 12,
+    backgroundColor: "rgba(124, 92, 255, 0.95)",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+  },
+  modelBadgeText: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  modelComparisonHint: {
+    textAlign: "center",
+    color: "#666",
+    fontSize: 12,
+    marginTop: 8,
+  },
+  // Model switch section styles
+  modelSwitchSection: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: "#1a1a24",
+    marginHorizontal: 16,
+    borderRadius: 12,
+    marginBottom: 8,
+  },
+  modelSwitchLabel: {
+    fontSize: 13,
+    color: "#888",
+    marginBottom: 8,
+  },
+  modelSwitchButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "#252530",
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#333",
+  },
+  modelSwitchButtonText: {
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: "600",
+  },
+  modelSwitchButtonIcon: {
+    color: "#7c5cff",
+    fontSize: 12,
+  },
+  regenerateButton: {
+    backgroundColor: "#7c5cff",
+    paddingVertical: 12,
+    borderRadius: 10,
+    alignItems: "center",
+    marginTop: 10,
+  },
+  regenerateButtonText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "700",
+  },
   resultActions: { flexDirection: "row", padding: 16, gap: 12 },
   resultActionBtn: {
     flex: 1,
@@ -2339,6 +2621,49 @@ const styles = StyleSheet.create({
   modelSelectorValue: {
     color: "#7c5cff",
     fontSize: 14,
+    fontWeight: "700",
+  },
+
+  // Settings Toggle Button
+  settingsToggleButton: {
+    marginTop: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    backgroundColor: "#1a1a24",
+    borderWidth: 1,
+    borderColor: "#252530",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  settingsToggleContent: {
+    flex: 1,
+  },
+  settingsToggleLabel: {
+    color: "#888",
+    fontSize: 14,
+    fontWeight: "500",
+  },
+  settingsToggleDesc: {
+    color: "#555",
+    fontSize: 11,
+    marginTop: 2,
+  },
+  settingsToggleSwitch: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+    backgroundColor: "#333",
+    minWidth: 50,
+    alignItems: "center",
+  },
+  settingsToggleSwitchOn: {
+    backgroundColor: "#7c5cff",
+  },
+  settingsToggleSwitchText: {
+    color: "#fff",
+    fontSize: 12,
     fontWeight: "700",
   },
 
@@ -2484,17 +2809,31 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: "#666",
   },
+  historyBadgeRow: {
+    flexDirection: "row",
+    gap: 4,
+    marginTop: 4,
+    flexWrap: "wrap",
+  },
+  historyModelBadge: {
+    backgroundColor: "rgba(124, 92, 255, 0.9)",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  historyModelBadgeText: {
+    fontSize: 9,
+    color: "#fff",
+    fontWeight: "600",
+  },
   historyRefBadge: {
-    position: "absolute",
-    top: -40,
-    right: 8,
-    backgroundColor: "#7c5cff",
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
+    backgroundColor: "#ff6b6b",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
   },
   historyRefBadgeText: {
-    fontSize: 10,
+    fontSize: 9,
     color: "#fff",
     fontWeight: "700",
   },

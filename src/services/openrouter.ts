@@ -39,12 +39,6 @@ export interface HairAnalysis {
   hairColor: {
     value: string; // natural color description
   };
-  hairCondition: {
-    value: string; // "excellent", "good", "fair", "needs care"
-    score: number; // 1-4
-  };
-  overallScore: number; // 1-100
-  stylingPotential: string; // "high", "medium", "low"
 }
 
 /**
@@ -134,8 +128,5 @@ function getDefaultHairAnalysis(): HairAnalysis {
     faceShape: { value: "oval" },
     hairLength: { value: "medium" },
     hairColor: { value: "brown" },
-    hairCondition: { value: "good", score: 3 },
-    overallScore: 70,
-    stylingPotential: "medium",
   };
 }

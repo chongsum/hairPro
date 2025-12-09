@@ -3,6 +3,10 @@ import { HairColor, HairLengthFilter } from "../types";
 // Hair length filter options
 export const HAIR_LENGTH_FILTERS: HairLengthFilter[] = [
   { id: "all", label: "All" },
+  { id: "korean", label: "Korean" },
+  { id: "japanese", label: "Japanese" },
+  { id: "curly", label: "Curly" },
+  { id: "trending2025", label: "2025" },
   { id: "buzz", label: "Buzz" },
   { id: "short", label: "Short" },
   { id: "medium", label: "Medium" },
@@ -49,6 +53,54 @@ export const HAIRSTYLES_BY_LENGTH = {
       "Classic Long",
       "Bohemian Waves",
     ],
+    korean: [
+      "Korean Two-Block Cut",
+      "Korean Comma Hair",
+      "Korean Middle Part Perm",
+      "Korean Dandy Cut",
+      "Korean Layered Fringe",
+      "Korean Fluffy Perm",
+      "Korean Side Part",
+      "Korean Textured Crop",
+      "Korean Center Part",
+      "Korean Natural Wave",
+    ],
+    japanese: [
+      "Japanese Wolf Cut",
+      "Japanese Messy Mash",
+      "Japanese Spiky Texture",
+      "Japanese Layered Mash",
+      "Japanese Center Part",
+      "Japanese Textured Fringe",
+      "Japanese Undercut Long",
+      "Japanese Natural Wave",
+      "Japanese Swept Back",
+      "Japanese Soft Layer",
+    ],
+    curly: [
+      "Curly Taper Fade",
+      "Curly Fringe",
+      "Curly Undercut",
+      "Afro Fade",
+      "Curly Shag",
+      "Tight Coils Crop",
+      "Loose Curl Flow",
+      "Curly Quiff",
+      "S-Curl Waves",
+      "Natural Curl Texture",
+    ],
+    trending2025: [
+      "Broccoli Cut",
+      "Fluffy Fringe Fade",
+      "Messy Fade",
+      "Micro Fringe Fade",
+      "Soft Boy Cut",
+      "Grown-Out Buzz",
+      "Low Taper Mullet",
+      "Textured Middle Part",
+      "Clean Boy Cut",
+      "Effortless Flow",
+    ],
   },
   female: {
     buzz: ["Buzz Cut", "Pixie Buzz", "Tapered Buzz"],
@@ -93,6 +145,54 @@ export const HAIRSTYLES_BY_LENGTH = {
       "Mermaid Waves",
       "Bohemian Long",
       "Rapunzel Layers",
+    ],
+    korean: [
+      "Korean Hush Cut",
+      "Korean C-Curl Bob",
+      "Korean Layered Cut",
+      "Korean See-Through Bangs",
+      "Korean Wavy Perm",
+      "Korean Long Layer",
+      "Korean Airy Bob",
+      "Korean Building Perm",
+      "Korean Hippie Perm",
+      "Korean Tassel Cut",
+    ],
+    japanese: [
+      "Japanese Hime Cut",
+      "Japanese Layered Bob",
+      "Japanese Straight Long",
+      "Japanese Shag",
+      "Japanese Blunt Bangs",
+      "Japanese Soft Layers",
+      "Japanese Choppy Bob",
+      "Japanese Princess Layers",
+      "Japanese Airy Waves",
+      "Japanese Micro Bangs",
+    ],
+    curly: [
+      "Curly Bob",
+      "Curly Shag",
+      "Big Bouncy Curls",
+      "Curly Bangs",
+      "Natural Curl Long",
+      "Defined Ringlets",
+      "Curly Lob",
+      "Afro Natural",
+      "Curly Layers",
+      "Wavy Curl Mix",
+    ],
+    trending2025: [
+      "Italian Bob",
+      "Mixie Cut",
+      "Jellyfish Cut",
+      "Octopus Cut",
+      "Razor Bob",
+      "Wispy Layers",
+      "Lived-In Lob",
+      "Bixie 2.0",
+      "Soft Shag",
+      "Curtain Layers",
     ],
   },
 } as const;
@@ -314,6 +414,254 @@ export const HAIRSTYLE_DESCRIPTIONS: Record<string, string> = {
 
   "Rapunzel Layers":
     "Extra-long hair with minimal layers. Fairy-tale length, healthy sleek finish. Statement length, high maintenance.",
+
+  // ============ MALE KOREAN ============
+  "Korean Two-Block Cut":
+    "Classic K-pop undercut with longer textured top (3-4 inches) and dramatically short disconnected sides. Sharp line between top and sides, soft natural texture on top. Clean modern Korean aesthetic, versatile styling.",
+
+  "Korean Comma Hair":
+    "Korean idol hairstyle with soft center-part or slight side-part. The front bangs are medium length (covering eyebrows) and gently swept to the sides, curving SUBTLY inward at the tips like a soft 'C' shape - NOT an exaggerated curl. Natural, effortless texture with slight volume on top. Hair should look soft, touchable, and naturally styled - NOT stiff or overly curled. Clean tapered sides. The 'comma' effect is very subtle, just the natural way the bangs fall and curve slightly inward at the ends.",
+
+  "Korean Middle Part Perm":
+    "Center-parted medium length with soft digital perm waves. Natural S-wave pattern, 4-5 inches length framing face. Effortless romantic K-drama male lead aesthetic.",
+
+  "Korean Dandy Cut":
+    "Clean, professional Korean business cut with neat side part. 2-3 inches on top, tapered sides, polished finish. Sophisticated Seoul office worker style.",
+
+  "Korean Layered Fringe":
+    "Layered bangs falling softly on forehead with textured top. 3-4 inches length, piece-y natural finish. Casual K-pop trainee aesthetic.",
+
+  "Korean Fluffy Perm":
+    "Voluminous soft perm with maximum airiness and bounce. Medium length with cloud-like texture, natural movement. Trendy Korean salon style.",
+
+  "Korean Side Part":
+    "Refined side-swept style with soft volume at crown. Clean side part, 3-4 inches length, natural wave texture. Classic Korean gentleman look.",
+
+  "Korean Textured Crop":
+    "Messy textured Korean crop with piece-y finish. Short-medium length with defined strands, undercut sides. Modern Seoul street style.",
+
+  "Korean Center Part":
+    "Middle-parted style with curtain-like framing on both sides. 4-5 inches length, natural soft texture. K-pop idol signature look.",
+
+  "Korean Natural Wave":
+    "Soft natural wave pattern with effortless styling. Medium length with gentle movement, no-product natural finish. Everyday Korean casual style.",
+
+  // ============ MALE JAPANESE ============
+  "Japanese Wolf Cut":
+    "Disconnected layers with shorter crown and longer face-framing pieces. Heavy texture, shaggy finish, 4-6 inches varying length. Tokyo street fashion inspired.",
+
+  "Japanese Messy Mash":
+    "Rounded mash top with intentional messy texture. Medium length covering ears, soft piece-y finish. Harajuku casual aesthetic.",
+
+  "Japanese Spiky Texture":
+    "Defined spiky texture with product-enhanced points. Short-medium length with vertical movement. J-rock visual kei influenced style.",
+
+  "Japanese Layered Mash":
+    "Rounded layered top with soft edges and movement. Mushroom-inspired shape, 3-4 inches with natural flow. Japanese college student classic.",
+
+  "Japanese Center Part":
+    "Natural flowing center part with soft curtain effect. Medium length, minimal styling, organic texture. Effortless Japanese minimalist aesthetic.",
+
+  "Japanese Textured Fringe":
+    "Piece-y bangs with defined strand separation. Medium top with heavy textured fringe, clean sides. Tokyo salon trend style.",
+
+  "Japanese Undercut Long":
+    "Long textured top (5-6 inches) with shaved undercut sides. Can be tied or worn down, dramatic contrast. Modern samurai inspired.",
+
+  "Japanese Natural Wave":
+    "Soft natural wave with organic movement. Medium length with effortless bedhead texture. Japanese natural beauty aesthetic.",
+
+  "Japanese Swept Back":
+    "Elegant slicked-back style with volume at crown. Medium length swept away from face, polished finish. Sophisticated Tokyo businessman look.",
+
+  "Japanese Soft Layer":
+    "Delicate layering with feathered ends and soft movement. Medium length with lightweight finish. Japanese salon precision cutting.",
+
+  // ============ MALE CURLY ============
+  "Curly Taper Fade":
+    "Natural curls on top with clean taper fade on sides. 2-3 inches of curl length, defined curl pattern. Modern barbershop curly classic.",
+
+  "Curly Fringe":
+    "Curly bangs falling forward onto forehead. Medium length curls with textured fringe, faded sides. Romantic curly boy aesthetic.",
+
+  "Curly Undercut":
+    "Defined curls on top with dramatically shaved sides. 3-4 inches of curl, sharp contrast with buzzed undercut. Edgy curly statement style.",
+
+  "Afro Fade":
+    "Natural afro texture on top with graduated fade on sides. Shaped afro crown, clean fade transition. Classic Black barbershop style.",
+
+  "Curly Shag":
+    "Messy layered curls with maximum movement and volume. Medium-long length, shaggy texture throughout. 70s rock curly revival.",
+
+  "Tight Coils Crop":
+    "Short tight curl texture with defined coil pattern. 1-2 inches length, natural coil shape. Low maintenance natural curly cut.",
+
+  "Loose Curl Flow":
+    "Medium flowing loose curls with natural movement. 4-5 inches length, relaxed curl pattern. Surfer-meets-curly aesthetic.",
+
+  "Curly Quiff":
+    "Volumetric curly top swept up and back. Curls styled for height at front, faded sides. Curly pompadour alternative.",
+
+  "S-Curl Waves":
+    "Defined S-pattern waves with structured curl definition. Medium length with product-enhanced wave. Sleek curly gentleman style.",
+
+  "Natural Curl Texture":
+    "Embracing natural curl pattern with minimal manipulation. Medium length, hydrated healthy curls. Natural hair movement.",
+
+  // ============ MALE 2025 TRENDING ============
+  "Broccoli Cut":
+    "Viral TikTok perm style with tight curls on top resembling broccoli florets. High fade sides, voluminous curly top. Gen-Z signature look.",
+
+  "Fluffy Fringe Fade":
+    "Soft fluffy bangs with volume and airiness, clean fade on sides. Gentle textured top, dreamy soft aesthetic. K-pop meets Western trend.",
+
+  "Messy Fade":
+    "Intentionally undone texture on top with precision fade underneath. Messy-on-purpose top, clean sides. Effortless cool 2025 style.",
+
+  "Micro Fringe Fade":
+    "Ultra-short tiny bangs hitting high on forehead with skin fade. Bold fashion-forward statement. Avant-garde editorial style.",
+
+  "Soft Boy Cut":
+    "Gentle romantic aesthetic with soft layers and natural texture. Medium length, no harsh lines, dreamy finish. Sensitive artist vibe.",
+
+  "Grown-Out Buzz":
+    "Transitional length from buzz cut growing out. Even fluffy length, natural texture emerging. Intentional in-between aesthetic.",
+
+  "Low Taper Mullet":
+    "Modern mullet with low taper fade on sides. Textured party in back, business up front. 2025 mullet revival.",
+
+  "Textured Middle Part":
+    "Messy center part with heavy texture throughout. 4-5 inches with piece-y, undone finish. Effortless cool aesthetic.",
+
+  "Clean Boy Cut":
+    "Neat minimal style with soft edges and clean lines. Short-medium length, natural finish. Korean-influenced minimal look.",
+
+  "Effortless Flow":
+    "Natural medium length with organic movement. No-product natural style, healthy hair emphasis. Anti-styled trend.",
+
+  // ============ FEMALE KOREAN ============
+  "Korean Hush Cut":
+    "Soft face-framing layers with wispy ends and delicate movement. Shoulder to long length, curtain-like layers around face. Quiet luxury Korean aesthetic.",
+
+  "Korean C-Curl Bob":
+    "Chin to shoulder-length bob with inward-curling ends forming C-shape. Sleek body with bouncy curled tips. Classic Korean salon style.",
+
+  "Korean Layered Cut":
+    "Soft graduated layers with natural movement and airiness. Face-framing pieces, feathered ends. Universally flattering Korean cut.",
+
+  "Korean See-Through Bangs":
+    "Thin, wispy, transparent bangs showing forehead through delicate strands. Paired with any length, ultra-feminine effect. K-beauty signature.",
+
+  "Korean Wavy Perm":
+    "Soft S-wave digital perm with natural-looking curls. Long length with loose romantic waves throughout. Korean salon perm specialty.",
+
+  "Korean Long Layer":
+    "Long hair with delicate face-framing layers. Minimal layering, maximum length, subtle movement. Elegant Korean beauty standard.",
+
+  "Korean Airy Bob":
+    "Lightweight bob with maximum airiness and movement. Thin ends, see-through texture, effortless bounce. Modern Korean chic.",
+
+  "Korean Building Perm":
+    "Volumizing perm creating body and bounce at roots. Medium-long length with lifted crown. Korean volume solution.",
+
+  "Korean Hippie Perm":
+    "Loose retro waves with 70s-inspired movement. Long length with gentle undulating pattern. Trendy Korean revival style.",
+
+  "Korean Tassel Cut":
+    "Feathery layered ends resembling tassel fringe. Shoulder-long length with wispy textured tips. Playful Korean style.",
+
+  // ============ FEMALE JAPANESE ============
+  "Japanese Hime Cut":
+    "Traditional princess cut with straight blunt bangs and cheek-length side pieces. Long back length, geometric face framing. Classic Japanese elegance.",
+
+  "Japanese Layered Bob":
+    "Soft layered bob with rounded silhouette and movement. Chin-length with gentle layers. Japanese salon precision.",
+
+  "Japanese Straight Long":
+    "Pin-straight sleek long hair with mirror-like shine. One-length, minimal layers, glass-hair finish. Japanese hair ideal.",
+
+  "Japanese Shag":
+    "Textured layered look with choppy ends and volume. Medium-long length, 70s shag Japanese interpretation. Tokyo street style.",
+
+  "Japanese Blunt Bangs":
+    "Thick straight fringe cut precisely across forehead. Any length, heavy dense bangs. Bold Japanese statement.",
+
+  "Japanese Soft Layers":
+    "Delicate layering with feathered technique and soft edges. Long length, barely-there layers. Subtle Japanese refinement.",
+
+  "Japanese Choppy Bob":
+    "Edgy textured bob with razored choppy ends. Chin-length with maximum texture. Tokyo fashion forward.",
+
+  "Japanese Princess Layers":
+    "Face-framing long layers with romantic softness. Hime-inspired without strict geometry. Modern Japanese feminine.",
+
+  "Japanese Airy Waves":
+    "Soft movement waves with lightweight texture. Long length, effortless natural wave. Japanese natural beauty.",
+
+  "Japanese Micro Bangs":
+    "Ultra-short fringe hitting mid-forehead or higher. Bold avant-garde statement with any length. Japanese editorial style.",
+
+  // ============ FEMALE CURLY ============
+  "Curly Bob":
+    "Bouncy curly bob with natural curl shrinkage considered. Chin to shoulder when curled, defined curl pattern. Playful curly classic.",
+
+  "Curly Shag_female":
+    "Layered curly shag with maximum volume and movement. Face-framing curly pieces, 70s inspired. Curly texture celebration.",
+
+  "Big Bouncy Curls":
+    "Voluminous spiral curls with dramatic bounce and body. Medium-long length, defined large curl pattern. Hollywood glamour curls.",
+
+  "Curly Bangs":
+    "Face-framing curly fringe with natural curl pattern. Curly bangs paired with curly length. Embracing natural texture.",
+
+  "Natural Curl Long":
+    "Long natural curls with hydrated healthy definition. Maximum length, natural curl pattern. Curly hair goals.",
+
+  "Defined Ringlets":
+    "Structured spiral curls with precise definition. Medium-long length, uniform ringlet shape. Polished curly style.",
+
+  "Curly Lob":
+    "Curly long bob accounting for curl spring. Shoulder-length when stretched, bouncy finish. Modern curly cut.",
+
+  "Afro Natural":
+    "Full natural afro with shaped silhouette. Maximum volume, natural coil pattern. Beautiful natural texture.",
+
+  "Curly Layers":
+    "Layered curly style for shape and movement. Graduated layers working with curl pattern. Curly-specific cutting.",
+
+  "Wavy Curl Mix":
+    "Mixed texture with waves and curls throughout. Natural pattern variety, medium-long length. Embracing multi-texture.",
+
+  // ============ FEMALE 2025 TRENDING ============
+  "Italian Bob":
+    "2024/2025 trending bob with soft layers and natural movement. Chin-length, lived-in texture, European chic. Viral trend bob.",
+
+  "Mixie Cut":
+    "Hybrid between mullet and pixie with short top and textured sides. Edgy feminine cut, fashion-forward. TikTok viral style.",
+
+  "Jellyfish Cut":
+    "Dramatic layered look with short rounded top layer over long straight underneath. Two-tiered jellyfish silhouette. Asian trend style.",
+
+  "Octopus Cut":
+    "Extreme layering creating tentacle-like pieces. Heavy short layers on top, longer strands below. Dramatic layered trend.",
+
+  "Razor Bob":
+    "Sharp edgy bob with razored ends and texture. Chin-length with piece-y razor-cut finish. Edgy modern style.",
+
+  "Wispy Layers":
+    "Ultra-thin layered pieces with air and movement. Any length, barely-there feathered layers. Delicate 2025 trend.",
+
+  "Lived-In Lob":
+    "Effortless long bob with grown-out natural texture. Minimal styling, relaxed finish. Anti-perfect beauty trend.",
+
+  "Bixie 2.0":
+    "Updated bob-pixie hybrid with modern texture and movement. Between lengths, versatile styling. 2025 evolution cut.",
+
+  "Soft Shag":
+    "Gentle layered shag with less dramatic layers. Shoulder length, soft face-framing. Approachable shag version.",
+
+  "Curtain Layers":
+    "Dramatic curtain-style face framing with heavy layers. Long length with bold 70s-inspired framing. Statement layering.",
 };
 
 /**
