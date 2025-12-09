@@ -910,6 +910,61 @@ export default function App() {
     return (
       <SafeAreaView style={styles.container}>
         <StatusBar style="light" />
+
+        {/* Model Selector Modal */}
+        <Modal
+          visible={showModelSelector}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setShowModelSelector(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>
+                  {t("selectModel", language)}
+                </Text>
+                <TouchableOpacity
+                  style={styles.modalCloseBtn}
+                  onPress={() => setShowModelSelector(false)}
+                >
+                  <Text style={styles.modalCloseText}>✕</Text>
+                </TouchableOpacity>
+              </View>
+              <ScrollView style={styles.modelList}>
+                {SUPPORTED_MODELS.map((model) => (
+                  <TouchableOpacity
+                    key={model.id}
+                    style={[
+                      styles.modelItem,
+                      selectedModel.id === model.id && styles.modelItemActive,
+                    ]}
+                    onPress={() => {
+                      setSelectedModel(model);
+                      setShowModelSelector(false);
+                    }}
+                  >
+                    <View style={styles.modelItemContent}>
+                      <Text style={styles.modelItemName}>{model.name}</Text>
+                      <Text style={styles.modelItemDesc}>
+                        {model.description[language]}
+                      </Text>
+                      <Text style={styles.modelItemEndpoint}>
+                        {model.endpoint}
+                      </Text>
+                    </View>
+                    {selectedModel.id === model.id && (
+                      <View style={styles.modelItemCheck}>
+                        <Text style={styles.modelItemCheckText}>✓</Text>
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          </View>
+        </Modal>
+
         <View style={styles.styleSelectContainer}>
           <View style={styles.styleHeader}>
             <TouchableOpacity
@@ -1075,6 +1130,15 @@ export default function App() {
                   {getHairstyleDesc(selectedStyle, gender, language)}
                 </Text>
               </ScrollView>
+              {/* Model Selector */}
+              <TouchableOpacity
+                style={styles.styleModelSelector}
+                onPress={() => setShowModelSelector(true)}
+              >
+                <Text style={styles.styleModelLabel}>{t("model", language)}:</Text>
+                <Text style={styles.styleModelName}>{selectedModel.name}</Text>
+                <Text style={styles.styleModelIcon}>▼</Text>
+              </TouchableOpacity>
               <TouchableOpacity
                 style={styles.generateButton}
                 onPress={generateImages}
@@ -1095,6 +1159,61 @@ export default function App() {
     return (
       <SafeAreaView style={styles.container}>
         <StatusBar style="light" />
+
+        {/* Model Selector Modal */}
+        <Modal
+          visible={showModelSelector}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setShowModelSelector(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>
+                  {t("selectModel", language)}
+                </Text>
+                <TouchableOpacity
+                  style={styles.modalCloseBtn}
+                  onPress={() => setShowModelSelector(false)}
+                >
+                  <Text style={styles.modalCloseText}>✕</Text>
+                </TouchableOpacity>
+              </View>
+              <ScrollView style={styles.modelList}>
+                {SUPPORTED_MODELS.map((model) => (
+                  <TouchableOpacity
+                    key={model.id}
+                    style={[
+                      styles.modelItem,
+                      selectedModel.id === model.id && styles.modelItemActive,
+                    ]}
+                    onPress={() => {
+                      setSelectedModel(model);
+                      setShowModelSelector(false);
+                    }}
+                  >
+                    <View style={styles.modelItemContent}>
+                      <Text style={styles.modelItemName}>{model.name}</Text>
+                      <Text style={styles.modelItemDesc}>
+                        {model.description[language]}
+                      </Text>
+                      <Text style={styles.modelItemEndpoint}>
+                        {model.endpoint}
+                      </Text>
+                    </View>
+                    {selectedModel.id === model.id && (
+                      <View style={styles.modelItemCheck}>
+                        <Text style={styles.modelItemCheckText}>✓</Text>
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          </View>
+        </Modal>
+
         <ScrollView contentContainerStyle={styles.refUploadContent}>
           <TouchableOpacity
             style={styles.backButton}
@@ -1286,14 +1405,25 @@ export default function App() {
             refImageDescription &&
             !isAnalyzingRef &&
             !refAnalysisFailed && (
-              <TouchableOpacity
-                style={styles.generateButton}
-                onPress={generateImages}
-              >
-                <Text style={styles.generateButtonText}>
-                  {t("generatePreview", language)}
-                </Text>
-              </TouchableOpacity>
+              <>
+                {/* Model Selector */}
+                <TouchableOpacity
+                  style={styles.styleModelSelector}
+                  onPress={() => setShowModelSelector(true)}
+                >
+                  <Text style={styles.styleModelLabel}>{t("model", language)}:</Text>
+                  <Text style={styles.styleModelName}>{selectedModel.name}</Text>
+                  <Text style={styles.styleModelIcon}>▼</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.generateButton}
+                  onPress={generateImages}
+                >
+                  <Text style={styles.generateButtonText}>
+                    {t("generatePreview", language)}
+                  </Text>
+                </TouchableOpacity>
+              </>
             )}
         </ScrollView>
       </SafeAreaView>
@@ -2236,6 +2366,33 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#ccc",
     lineHeight: 22,
+  },
+  // Style panel model selector
+  styleModelSelector: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#252530",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: "#333",
+  },
+  styleModelLabel: {
+    color: "#888",
+    fontSize: 13,
+    marginRight: 8,
+  },
+  styleModelName: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "600",
+    flex: 1,
+  },
+  styleModelIcon: {
+    color: "#7c5cff",
+    fontSize: 12,
   },
   generateButton: {
     backgroundColor: "#7c5cff",
