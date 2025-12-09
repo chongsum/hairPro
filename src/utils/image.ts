@@ -31,4 +31,3 @@ export const resizeAndCompressImage = async (
     return { uri, base64: "" };
   }
 };
-

@@ -1,4 +1,5 @@
 import axios from "axios";
+import { buildUserHairAnalysisPrompt } from "./prompts";
 
 const OPENROUTER_API_KEY = process.env.EXPO_PUBLIC_OPENROUTER_API_KEY;
 
@@ -59,20 +60,8 @@ export const analyzeHair = async (
     console.log("=== STARTING FAST HAIR ANALYSIS ===");
     console.log("Using vision model:", VISION_MODEL);
 
-    // Simplified prompt for faster response
-    const analysisPrompt = `Analyze this ${gender} client's hair for a salon consultation.
-
-Return ONLY this JSON (no other text):
-{
-  "hairTexture": {"value": "<straight|wavy|curly|coily>"},
-  "hairDensity": {"value": "<thin|medium|thick>"},
-  "faceShape": {"value": "<oval|round|square|heart|oblong|diamond>"},
-  "hairLength": {"value": "<very short|short|medium|long|very long>"},
-  "hairColor": {"value": "<brief color description>"},
-  "hairCondition": {"value": "<excellent|good|fair|needs care>", "score": <1-4>},
-  "overallScore": <50-100>,
-  "stylingPotential": "<high|medium|low>"
-}`;
+    // Prompt from centralized prompts.ts
+    const analysisPrompt = buildUserHairAnalysisPrompt(gender);
 
     const response = await api.post("/chat/completions", {
       model: VISION_MODEL,

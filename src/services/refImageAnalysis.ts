@@ -1,4 +1,5 @@
 import axios from "axios";
+import { REF_IMAGE_ANALYSIS_PROMPT } from "./prompts";
 
 const OPENROUTER_API_KEY = process.env.EXPO_PUBLIC_OPENROUTER_API_KEY;
 const VISION_MODEL =
@@ -27,27 +28,8 @@ export const analyzeRefImageHairstyle = async (
     imageBase64OrUrl.startsWith("http") ? "URL" : "base64"
   );
 
-  const prompt = `You are a professional hairstylist and AI image generation prompt engineer. Analyze this reference hairstyle image and create a detailed description that will be used to apply this exact hairstyle to a different person via AI image generation.
-
-IMPORTANT: Do NOT describe the hair COLOR. The user will select the hair color separately. Focus ONLY on the hairstyle structure, cut, and styling.
-
-Describe the hairstyle with PRECISE technical details:
-
-1. **Length & Cut**: Exact length (e.g., chin-length, shoulder-length, mid-back), layering type (long layers, short choppy layers, one-length), and cut style name if identifiable
-
-2. **Texture & Finish**: Hair texture (straight, wavy, curly, coily), finish (sleek/glossy, matte, natural, voluminous), and any visible styling (blown out, air-dried, heat-styled)
-
-3. **Bangs/Fringe**: Type (curtain bangs, blunt bangs, side-swept, wispy, micro bangs) or no bangs, length relative to face
-
-4. **Parting & Direction**: Part location (center, side, deep side, no part), hair flow direction, any asymmetry
-
-5. **Volume & Shape**: Where volume is concentrated (roots, mid-lengths, ends), overall silhouette (round, triangular, elongated), any face-framing pieces
-
-6. **Styling Details**: Visible techniques (curls, waves, flips, tucked behind ears, half-up), any accessories
-
-OUTPUT FORMAT: Write a single, flowing description (3-4 sentences) in the style of an image generation prompt. Use vivid, specific adjectives. Do NOT use bullet points or lists. Do NOT mention hair color, the person's face, skin, or any non-hair features. Start directly with the hair description.
-
-Example output style: "Shoulder-length layered hair with soft curtain bangs framing the face, styled in loose beach waves with natural volume at the roots. The layers start at chin-level and blend seamlessly to the ends, creating movement and texture. A subtle center part allows the hair to flow symmetrically, with the ends flipped slightly outward for a polished yet effortless finish."`;
+  // Prompt from centralized prompts.ts
+  const prompt = REF_IMAGE_ANALYSIS_PROMPT;
 
   const imageContent =
     imageBase64OrUrl.startsWith("data:") || imageBase64OrUrl.startsWith("http")

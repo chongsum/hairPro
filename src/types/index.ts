@@ -6,7 +6,9 @@ export type Screen =
   | "styleSelect"
   | "refUpload"
   | "generating"
-  | "result";
+  | "result"
+  | "history"
+  | "historyDetail";
 
 export type Gender = "male" | "female";
 export type FlowType = "ref" | "style";

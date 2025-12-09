@@ -1,5 +1,5 @@
 import { StatusBar } from "expo-status-bar";
-import React, { useState, useRef, useCallback } from "react";
+import React, { useState, useRef, useCallback, useEffect } from "react";
 import {
   StyleSheet,
   Text,
@@ -12,6 +12,7 @@ import {
   Dimensions,
   ActivityIndicator,
   FlatList,
+  Modal,
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { CameraView, useCameraPermissions } from "expo-camera";
@@ -19,8 +20,16 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 // Services
 import { generateHairstyle } from "./src/services/falai";
+import { buildHairstyleGenerationPrompt } from "./src/services/prompts";
 import { analyzeHair, HairAnalysis } from "./src/services/openrouter";
 import { analyzeRefImageHairstyle } from "./src/services/refImageAnalysis";
+import {
+  loadHistory,
+  saveToHistory,
+  deleteHistoryItem,
+  clearHistory,
+  HistoryItem,
+} from "./src/services/historyService";
 
 // Utils
 import { resizeAndCompressImage } from "./src/utils/image";
@@ -30,7 +39,25 @@ import {
   HAIR_COLORS,
   HAIR_LENGTH_FILTERS,
   HAIRSTYLES_BY_LENGTH,
+  getHairstyleDescription,
 } from "./src/constants";
+
+// Translations
+import {
+  Language,
+  t,
+  getHairstyleName,
+  getHairstyleDesc,
+  getFilterLabel,
+  getColorName,
+} from "./src/constants/translations";
+
+// Models
+import {
+  SUPPORTED_MODELS,
+  ImageModel,
+  getDefaultModel,
+} from "./src/constants/models";
 
 // Types
 import { Screen, Gender, FlowType, UserPhoto, RefImage } from "./src/types";
@@ -46,8 +73,17 @@ export default function App() {
   const [screen, setScreen] = useState<Screen>("initial");
   const [flowType, setFlowType] = useState<FlowType>("style");
 
+  // Language state
+  const [language, setLanguage] = useState<Language>("en");
+
+  // Model state
+  const [selectedModel, setSelectedModel] = useState<ImageModel>(
+    getDefaultModel()
+  );
+  const [showModelSelector, setShowModelSelector] = useState(false);
+
   // User preferences
-  const [gender, setGender] = useState<Gender>("female");
+  const [gender, setGender] = useState<Gender>("male");
 
   // Image state
   const [userPhoto, setUserPhoto] = useState<UserPhoto | null>(null);
@@ -79,6 +115,22 @@ export default function App() {
   const [permission, requestPermission] = useCameraPermissions();
   const [showCamera, setShowCamera] = useState(false);
 
+  // History states
+  const [historyItems, setHistoryItems] = useState<HistoryItem[]>([]);
+  const [selectedHistoryItem, setSelectedHistoryItem] =
+    useState<HistoryItem | null>(null);
+
+  // ============ HISTORY LOADING ============
+
+  // Load history on mount
+  useEffect(() => {
+    const loadHistoryData = async () => {
+      const history = await loadHistory();
+      setHistoryItems(history);
+    };
+    loadHistoryData();
+  }, []);
+
   // ============ HELPER FUNCTIONS ============
 
   // Get filtered hairstyles
@@ -89,6 +141,21 @@ export default function App() {
     }
     return allStyles[selectedLengthFilter as keyof typeof allStyles] || [];
   }, [gender, selectedLengthFilter]);
+
+  // Get preview image for a style from history (most recent generation for that style)
+  const getStylePreviewImage = useCallback(
+    (styleName: string): string | null => {
+      // Find the most recent history item with this style name and matching gender
+      const historyItem = historyItems.find(
+        (item) =>
+          item.styleName === styleName &&
+          item.gender === gender &&
+          item.flowType === "style"
+      );
+      return historyItem?.imageUri || null;
+    },
+    [historyItems, gender]
+  );
 
   // Reset app state
   const resetApp = () => {
@@ -281,100 +348,85 @@ export default function App() {
       // Step 2: Build prompt and generate (30-95%)
       setGenerationStep("Creating your new hairstyle...");
 
-      // Build the hairstyle description
-      let hairstyleDetails = "";
+      // ============================================================
+      // BUILD PROMPT USING CENTRALIZED SYSTEM (see src/services/prompts.ts)
+      // ============================================================
+
+      // Get target hairstyle description
+      let targetHairstyleDescription = "";
       if (flowType === "ref" && refImageDescription) {
-        hairstyleDetails = refImageDescription;
+        // PATH 2: Reference Image - use analyzed description
+        targetHairstyleDescription = refImageDescription;
       } else {
-        hairstyleDetails = `${selectedStyle} hairstyle`;
+        // PATH 1: Style Selection - use stored professional description
+        const professionalDescription = getHairstyleDescription(
+          selectedStyle,
+          gender
+        );
+        targetHairstyleDescription = `${selectedStyle} - ${professionalDescription}`;
       }
 
-      // Handle color - either new color or keep natural
+      // Get color setting
       const colorName =
-        HAIR_COLORS.find((c) => c.id === selectedColor)?.name || "";
-      const isNaturalColor = !colorName || colorName === "Natural";
-      
-      let colorInstruction = "";
-      if (isNaturalColor) {
-        // Explicitly instruct to keep original color
-        colorInstruction = "KEEP the person's original/natural hair color exactly as-is";
-      } else {
-        hairstyleDetails += ` with ${colorName} hair color`;
-        colorInstruction = `Change hair color to ${colorName}`;
-      }
+        HAIR_COLORS.find((c) => c.id === selectedColor)?.name || "Natural";
 
-      // Build context from hair analysis
-      let hairContext = "";
+      // Build user hair analysis string
+      let userHairAnalysis = "No hair analysis available";
       if (analysis) {
-        hairContext = `The person has ${analysis.hairTexture.value} hair texture, ${analysis.hairDensity.value} density, and ${analysis.faceShape.value} face shape.`;
+        userHairAnalysis = `Hair texture: ${analysis.hairTexture.value}, Density: ${analysis.hairDensity.value}, Face shape: ${analysis.faceShape.value}`;
       }
 
-      // Build comprehensive prompt for photorealistic hair transformation
-      const styleDescription = `
-TASK: Professional virtual hairstyle try-on. Transform ONLY the hair to show: ${hairstyleDetails}.
-
-HAIR COLOR: ${colorInstruction}
-
-HAIR REQUIREMENTS:
-- Photorealistic, salon-quality ${gender === "female" ? "women's" : "men's"} hairstyle
-- Natural hair physics: proper weight, gravity, volume, and movement
-- Realistic hair texture with individual strand detail and natural shine
-- Seamless blend at hairline, temples, and nape
-- Style must be practically achievable by a professional hairstylist
-${hairContext ? `- Consider: ${hairContext}` : ""}
-
-STRICT PRESERVATION (DO NOT MODIFY):
-- Face: Keep exact facial features, skin tone, expression, makeup unchanged
-- No face enhancement, beautification, smoothing, or reshaping
-- Eyes, eyebrows, nose, ears, lips must remain identical to original
-- Body, clothing, jewelry, accessories unchanged
-- Background and lighting unchanged
-- Image composition and framing unchanged
-${isNaturalColor ? "- Hair color: MUST remain the person's original/natural hair color" : ""}
-
-OUTPUT: Single photorealistic image showing only the new hairstyle applied naturally to this exact person.
-`.trim();
-
-      console.log("Generation prompt:", styleDescription);
+      console.log(
+        "Target hairstyle:",
+        targetHairstyleDescription.substring(0, 100) + "..."
+      );
 
       const progressInterval2 = setInterval(() => {
         setGenerationProgress((prev) => Math.min(prev + 1, 95));
       }, 700);
 
-      // For ref image: use base64 data URL if available (uploaded), otherwise use URI (pasted URL)
-      let refImageForApi: string | undefined;
-      if (flowType === "ref" && refImage) {
-        console.log("=== REF IMAGE FOR GENERATION ===");
-        console.log("refImage.uri:", refImage.uri?.substring(0, 50) + "...");
-        console.log("refImage.base64 exists:", !!refImage.base64);
-        console.log("refImage.base64 length:", refImage.base64?.length || 0);
-        
-        if (refImage.base64) {
-          // Uploaded image - convert base64 to data URL
-          refImageForApi = refImage.base64.startsWith("data:")
-            ? refImage.base64
-            : `data:image/jpeg;base64,${refImage.base64}`;
-          console.log("Using base64 data URL for ref image");
-        } else if (refImage.uri.startsWith("http")) {
-          // Pasted URL - use directly
-          refImageForApi = refImage.uri;
-          console.log("Using URL for ref image:", refImageForApi);
-        }
-        console.log("refImageForApi length:", refImageForApi?.length || 0);
-      }
+      // Build the comprehensive prompt (same for both paths)
+      const finalPrompt = buildHairstyleGenerationPrompt({
+        userHairAnalysis,
+        targetHairstyleDescription,
+        hairColor: colorName,
+        gender,
+      });
 
+      console.log("Final prompt:", finalPrompt.substring(0, 200) + "...");
+
+      // Generate hairstyle using user photo + text description
       const result = await generateHairstyle(
         userPhoto.base64,
-        styleDescription,
+        finalPrompt,
         gender,
-        refImageForApi
+        selectedModel
       );
 
       clearInterval(progressInterval2);
       setGenerationProgress(100);
-      setGenerationStep("Complete!");
+      setGenerationStep("Saving to history...");
       setGeneratedImage(result);
 
+      // Save to history
+      try {
+        const styleName =
+          flowType === "ref" ? "Reference Style" : selectedStyle;
+        const historyItem = await saveToHistory(
+          result,
+          userPhoto.uri,
+          styleName,
+          gender,
+          selectedColor,
+          flowType,
+          flowType === "ref" ? refImage?.uri : undefined
+        );
+        setHistoryItems((prev) => [historyItem, ...prev]);
+      } catch (historyError) {
+        console.error("Failed to save to history:", historyError);
+      }
+
+      setGenerationStep("Complete!");
       setTimeout(() => setScreen("result"), 500);
     } catch (error: any) {
       Alert.alert(
@@ -393,6 +445,7 @@ OUTPUT: Single photorealistic image showing only the new hairstyle applied natur
     flowType,
     refImage,
     refImageDescription,
+    selectedModel,
   ]);
 
   // ============ SCREENS ============
@@ -402,34 +455,83 @@ OUTPUT: Single photorealistic image showing only the new hairstyle applied natur
     return (
       <SafeAreaView style={styles.container}>
         <StatusBar style="light" />
+
+        {/* Model Selector Modal */}
+        <Modal
+          visible={showModelSelector}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setShowModelSelector(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>
+                  {t("selectModel", language)}
+                </Text>
+                <TouchableOpacity
+                  style={styles.modalCloseBtn}
+                  onPress={() => setShowModelSelector(false)}
+                >
+                  <Text style={styles.modalCloseText}>✕</Text>
+                </TouchableOpacity>
+              </View>
+              <ScrollView style={styles.modelList}>
+                {SUPPORTED_MODELS.map((model) => (
+                  <TouchableOpacity
+                    key={model.id}
+                    style={[
+                      styles.modelItem,
+                      selectedModel.id === model.id && styles.modelItemActive,
+                    ]}
+                    onPress={() => {
+                      setSelectedModel(model);
+                      setShowModelSelector(false);
+                    }}
+                  >
+                    <View style={styles.modelItemContent}>
+                      <Text style={styles.modelItemName}>{model.name}</Text>
+                      <Text style={styles.modelItemDesc}>
+                        {model.description[language]}
+                      </Text>
+                      <Text style={styles.modelItemEndpoint}>
+                        {model.endpoint}
+                      </Text>
+                    </View>
+                    {selectedModel.id === model.id && (
+                      <View style={styles.modelItemCheck}>
+                        <Text style={styles.modelItemCheckText}>✓</Text>
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          </View>
+        </Modal>
+
         <ScrollView contentContainerStyle={styles.initialContent}>
+          {/* Language Toggle */}
+          <TouchableOpacity
+            style={styles.languageToggle}
+            onPress={() => setLanguage(language === "en" ? "zh-TW" : "en")}
+          >
+            <Text style={styles.languageToggleText}>
+              {language === "en" ? "中文" : "EN"}
+            </Text>
+          </TouchableOpacity>
+
           <View style={styles.logoSection}>
             <Text style={styles.logoEmoji}>✂️</Text>
-            <Text style={styles.logoTitle}>HairPro</Text>
-            <Text style={styles.logoSubtitle}>AI Hairstyle Preview</Text>
+            <Text style={styles.logoTitle}>{t("appName", language)}</Text>
+            <Text style={styles.logoSubtitle}>
+              {t("appSubtitle", language)}
+            </Text>
           </View>
 
           <View style={styles.selectionSection}>
-            <Text style={styles.sectionLabel}>I am</Text>
+            <Text style={styles.sectionLabel}>{t("iAm", language)}</Text>
             <View style={styles.genderRow}>
-              <TouchableOpacity
-                style={[
-                  styles.genderPill,
-                  gender === "female" && styles.genderPillActive,
-                ]}
-                onPress={() => setGender("female")}
-              >
-                <Text style={styles.genderEmoji}>👩</Text>
-                <Text
-                  style={[
-                    styles.genderText,
-                    gender === "female" && styles.genderTextActive,
-                  ]}
-                >
-                  Female
-                </Text>
-              </TouchableOpacity>
-
               <TouchableOpacity
                 style={[
                   styles.genderPill,
@@ -444,14 +546,32 @@ OUTPUT: Single photorealistic image showing only the new hairstyle applied natur
                     gender === "male" && styles.genderTextActive,
                   ]}
                 >
-                  Male
+                  {t("male", language)}
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.genderPill,
+                  gender === "female" && styles.genderPillActive,
+                ]}
+                onPress={() => setGender("female")}
+              >
+                <Text style={styles.genderEmoji}>👩</Text>
+                <Text
+                  style={[
+                    styles.genderText,
+                    gender === "female" && styles.genderTextActive,
+                  ]}
+                >
+                  {t("female", language)}
                 </Text>
               </TouchableOpacity>
             </View>
           </View>
 
           <View style={styles.selectionSection}>
-            <Text style={styles.sectionLabel}>I want to</Text>
+            <Text style={styles.sectionLabel}>{t("iWantTo", language)}</Text>
 
             <TouchableOpacity
               style={[
@@ -464,9 +584,11 @@ OUTPUT: Single photorealistic image showing only the new hairstyle applied natur
                 <Text style={styles.flowEmoji}>✨</Text>
               </View>
               <View style={styles.flowCardContent}>
-                <Text style={styles.flowCardTitle}>Browse Styles</Text>
+                <Text style={styles.flowCardTitle}>
+                  {t("browseStyles", language)}
+                </Text>
                 <Text style={styles.flowCardDesc}>
-                  Choose from our curated collection of hairstyles
+                  {t("browseStylesDesc", language)}
                 </Text>
               </View>
               {flowType === "style" && (
@@ -487,9 +609,11 @@ OUTPUT: Single photorealistic image showing only the new hairstyle applied natur
                 <Text style={styles.flowEmoji}>📷</Text>
               </View>
               <View style={styles.flowCardContent}>
-                <Text style={styles.flowCardTitle}>Use Reference Image</Text>
+                <Text style={styles.flowCardTitle}>
+                  {t("useRefImage", language)}
+                </Text>
                 <Text style={styles.flowCardDesc}>
-                  Upload a photo of the hairstyle you want
+                  {t("useRefImageDesc", language)}
                 </Text>
               </View>
               {flowType === "ref" && (
@@ -504,7 +628,30 @@ OUTPUT: Single photorealistic image showing only the new hairstyle applied natur
             style={styles.primaryButton}
             onPress={() => setScreen("photoCapture")}
           >
-            <Text style={styles.primaryButtonText}>Continue</Text>
+            <Text style={styles.primaryButtonText}>
+              {t("continue", language)}
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.historyButtonInitial}
+            onPress={() => setScreen("history")}
+          >
+            <Text style={styles.historyButtonInitialText}>
+              📸 {t("myHairstyles", language)}
+              {historyItems.length > 0 ? ` (${historyItems.length})` : ""}
+            </Text>
+          </TouchableOpacity>
+
+          {/* Model Selector Button */}
+          <TouchableOpacity
+            style={styles.modelSelectorButton}
+            onPress={() => setShowModelSelector(true)}
+          >
+            <Text style={styles.modelSelectorLabel}>
+              {t("aiModel", language)}
+            </Text>
+            <Text style={styles.modelSelectorValue}>{selectedModel.name}</Text>
           </TouchableOpacity>
         </ScrollView>
       </SafeAreaView>
@@ -520,13 +667,15 @@ OUTPUT: Single photorealistic image showing only the new hairstyle applied natur
             <StatusBar style="light" />
             <View style={styles.centerContent}>
               <Text style={styles.permissionText}>
-                Camera permission is required
+                {t("cameraPermissionRequired", language)}
               </Text>
               <TouchableOpacity
                 style={styles.primaryButton}
                 onPress={requestPermission}
               >
-                <Text style={styles.primaryButtonText}>Grant Permission</Text>
+                <Text style={styles.primaryButtonText}>
+                  {t("grantPermission", language)}
+                </Text>
               </TouchableOpacity>
             </View>
           </SafeAreaView>
@@ -540,7 +689,7 @@ OUTPUT: Single photorealistic image showing only the new hairstyle applied natur
             <View style={styles.cameraOverlay}>
               <View style={styles.faceGuide} />
               <Text style={styles.cameraHint}>
-                Position your face in the circle
+                {t("positionFace", language)}
               </Text>
             </View>
             <View style={styles.cameraControls}>
@@ -571,12 +720,12 @@ OUTPUT: Single photorealistic image showing only the new hairstyle applied natur
             style={styles.backButton}
             onPress={() => setScreen("initial")}
           >
-            <Text style={styles.backText}>← Back</Text>
+            <Text style={styles.backText}>← {t("back", language)}</Text>
           </TouchableOpacity>
 
-          <Text style={styles.screenTitle}>Take Your Photo</Text>
+          <Text style={styles.screenTitle}>{t("takeYourPhoto", language)}</Text>
           <Text style={styles.screenSubtitle}>
-            We need a clear front-facing photo of you
+            {t("photoSubtitle", language)}
           </Text>
 
           <View style={styles.photoOptions}>
@@ -586,7 +735,7 @@ OUTPUT: Single photorealistic image showing only the new hairstyle applied natur
                 if (!permission?.granted) {
                   const result = await requestPermission();
                   if (!result.granted) {
-                    Alert.alert("Camera access required");
+                    Alert.alert(t("cameraAccessRequired", language));
                     return;
                   }
                 }
@@ -594,8 +743,12 @@ OUTPUT: Single photorealistic image showing only the new hairstyle applied natur
               }}
             >
               <Text style={styles.photoOptionIcon}>📸</Text>
-              <Text style={styles.photoOptionTitle}>Take Selfie</Text>
-              <Text style={styles.photoOptionDesc}>Use your camera</Text>
+              <Text style={styles.photoOptionTitle}>
+                {t("takeSelfie", language)}
+              </Text>
+              <Text style={styles.photoOptionDesc}>
+                {t("useCamera", language)}
+              </Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -603,23 +756,29 @@ OUTPUT: Single photorealistic image showing only the new hairstyle applied natur
               onPress={pickImage}
             >
               <Text style={styles.photoOptionIcon}>🖼️</Text>
-              <Text style={styles.photoOptionTitle}>Upload Photo</Text>
-              <Text style={styles.photoOptionDesc}>From your gallery</Text>
+              <Text style={styles.photoOptionTitle}>
+                {t("uploadPhoto", language)}
+              </Text>
+              <Text style={styles.photoOptionDesc}>
+                {t("fromGallery", language)}
+              </Text>
             </TouchableOpacity>
           </View>
 
           <View style={styles.tipsBox}>
-            <Text style={styles.tipsTitle}>📋 For Best Results</Text>
-            <Text style={styles.tipItem}>• Good, even lighting</Text>
-            <Text style={styles.tipItem}>• Face the camera directly</Text>
-            <Text style={styles.tipItem}>
-              • Show your full face and hairline
+            <Text style={styles.tipsTitle}>
+              📋 {t("forBestResults", language)}
             </Text>
-            <Text style={styles.tipItem}>• Neutral background preferred</Text>
+            <Text style={styles.tipItem}>• {t("tipLighting", language)}</Text>
+            <Text style={styles.tipItem}>• {t("tipFaceCamera", language)}</Text>
+            <Text style={styles.tipItem}>• {t("tipShowFace", language)}</Text>
+            <Text style={styles.tipItem}>• {t("tipBackground", language)}</Text>
           </View>
 
           <TouchableOpacity style={styles.demoButton} onPress={useDemoPhoto}>
-            <Text style={styles.demoButtonText}>🧪 Use Demo Photo (Dev)</Text>
+            <Text style={styles.demoButtonText}>
+              🧪 {t("useDemoPhoto", language)}
+            </Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -639,12 +798,14 @@ OUTPUT: Single photorealistic image showing only the new hairstyle applied natur
               setScreen("photoCapture");
             }}
           >
-            <Text style={styles.backText}>← Back</Text>
+            <Text style={styles.backText}>← {t("back", language)}</Text>
           </TouchableOpacity>
 
-          <Text style={styles.screenTitle}>Confirm Your Photo</Text>
+          <Text style={styles.screenTitle}>
+            {t("confirmYourPhoto", language)}
+          </Text>
           <Text style={styles.screenSubtitle}>
-            Make sure your face and hair are clearly visible
+            {t("confirmSubtitle", language)}
           </Text>
 
           <View style={styles.photoConfirmPreview}>
@@ -665,7 +826,9 @@ OUTPUT: Single photorealistic image showing only the new hairstyle applied natur
                 setScreen("photoCapture");
               }}
             >
-              <Text style={styles.retakeButtonText}>Retake Photo</Text>
+              <Text style={styles.retakeButtonText}>
+                {t("retakePhoto", language)}
+              </Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -674,7 +837,9 @@ OUTPUT: Single photorealistic image showing only the new hairstyle applied natur
                 setScreen(flowType === "style" ? "styleSelect" : "refUpload")
               }
             >
-              <Text style={styles.confirmPhotoButtonText}>Looks Good ✓</Text>
+              <Text style={styles.confirmPhotoButtonText}>
+                {t("looksGood", language)}
+              </Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -698,13 +863,17 @@ OUTPUT: Single photorealistic image showing only the new hairstyle applied natur
                 setScreen("photoCapture");
               }}
             >
-              <Text style={styles.backText}>← Back</Text>
+              <Text style={styles.backText}>← {t("back", language)}</Text>
             </TouchableOpacity>
-            <Text style={styles.screenTitleSmall}>Choose Your Style</Text>
+            <Text style={styles.screenTitleSmall}>
+              {t("chooseYourStyle", language)}
+            </Text>
           </View>
 
           <View style={styles.colorPickerSection}>
-            <Text style={styles.colorPickerLabel}>Hair Color</Text>
+            <Text style={styles.colorPickerLabel}>
+              {t("hairColor", language)}
+            </Text>
             <FlatList
               horizontal
               showsHorizontalScrollIndicator={false}
@@ -735,7 +904,7 @@ OUTPUT: Single photorealistic image showing only the new hairstyle applied natur
                     ]}
                     numberOfLines={1}
                   >
-                    {item.name}
+                    {getColorName(item.id, language)}
                   </Text>
                 </TouchableOpacity>
               )}
@@ -765,7 +934,7 @@ OUTPUT: Single photorealistic image showing only the new hairstyle applied natur
                         styles.filterChipTextActive,
                     ]}
                   >
-                    {filter.label}
+                    {getFilterLabel(filter.id, language)}
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -776,43 +945,89 @@ OUTPUT: Single photorealistic image showing only the new hairstyle applied natur
             style={styles.stylesScrollView}
             contentContainerStyle={styles.stylesGrid}
           >
-            {filteredStyles.map((style) => (
-              <TouchableOpacity
-                key={style}
-                style={[
-                  styles.styleCard,
-                  selectedStyle === style && styles.styleCardActive,
-                ]}
-                onPress={() => setSelectedStyle(style)}
-              >
-                <View style={styles.stylePreviewPlaceholder}>
-                  <Text style={styles.stylePreviewIcon}>💇</Text>
-                </View>
-                <Text
+            {filteredStyles.map((style) => {
+              const previewImage = getStylePreviewImage(style);
+              const translatedName = getHairstyleName(style, language);
+              const translatedDesc = getHairstyleDesc(style, gender, language);
+              return (
+                <TouchableOpacity
+                  key={style}
                   style={[
-                    styles.styleCardText,
-                    selectedStyle === style && styles.styleCardTextActive,
+                    styles.styleCard,
+                    selectedStyle === style && styles.styleCardActive,
                   ]}
-                  numberOfLines={2}
+                  onPress={() => setSelectedStyle(style)}
                 >
-                  {style}
-                </Text>
-                {selectedStyle === style && (
-                  <View style={styles.styleCardCheck}>
-                    <Text style={styles.checkMarkSmall}>✓</Text>
+                  <View style={styles.stylePreviewPlaceholder}>
+                    {previewImage ? (
+                      <Image
+                        source={{ uri: previewImage }}
+                        style={styles.stylePreviewImage}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <Text style={styles.stylePreviewIcon}>💇</Text>
+                    )}
                   </View>
-                )}
-              </TouchableOpacity>
-            ))}
+                  <Text
+                    style={[
+                      styles.styleCardTitle,
+                      selectedStyle === style && styles.styleCardTitleActive,
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {translatedName}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.styleCardDescription,
+                      selectedStyle === style &&
+                        styles.styleCardDescriptionActive,
+                    ]}
+                    numberOfLines={4}
+                  >
+                    {translatedDesc}
+                  </Text>
+                  {selectedStyle === style && (
+                    <View style={styles.styleCardCheck}>
+                      <Text style={styles.checkMarkSmall}>✓</Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+              );
+            })}
           </ScrollView>
 
           {selectedStyle && (
-            <TouchableOpacity
-              style={styles.generateButton}
-              onPress={generateImages}
-            >
-              <Text style={styles.generateButtonText}>Generate Preview ✨</Text>
-            </TouchableOpacity>
+            <View style={styles.selectedStyleSection}>
+              <View style={styles.selectedStyleHeader}>
+                <Text style={styles.selectedStyleTitle}>
+                  {getHairstyleName(selectedStyle, language)}
+                </Text>
+                <TouchableOpacity
+                  style={styles.selectedStyleCloseBtn}
+                  onPress={() => setSelectedStyle("")}
+                >
+                  <Text style={styles.selectedStyleCloseText}>✕</Text>
+                </TouchableOpacity>
+              </View>
+              <ScrollView
+                style={styles.selectedStyleDescScroll}
+                nestedScrollEnabled
+              >
+                <Text style={styles.selectedStyleDesc}>
+                  {getHairstyleDesc(selectedStyle, gender, language)}
+                </Text>
+              </ScrollView>
+              <TouchableOpacity
+                style={styles.generateButton}
+                onPress={generateImages}
+              >
+                <Text style={styles.generateButtonText}>
+                  {t("generatePreview", language)}
+                </Text>
+              </TouchableOpacity>
+            </View>
           )}
         </View>
       </SafeAreaView>
@@ -834,16 +1049,20 @@ OUTPUT: Single photorealistic image showing only the new hairstyle applied natur
               setScreen("photoCapture");
             }}
           >
-            <Text style={styles.backText}>← Back</Text>
+            <Text style={styles.backText}>← {t("back", language)}</Text>
           </TouchableOpacity>
 
-          <Text style={styles.screenTitle}>Reference Hairstyle</Text>
+          <Text style={styles.screenTitle}>
+            {t("referenceHairstyle", language)}
+          </Text>
           <Text style={styles.screenSubtitle}>
-            Upload or paste a URL of the hairstyle you want
+            {t("refSubtitle", language)}
           </Text>
 
           <View style={styles.colorPickerSection}>
-            <Text style={styles.colorPickerLabel}>Target Hair Color</Text>
+            <Text style={styles.colorPickerLabel}>
+              {t("targetHairColor", language)}
+            </Text>
             <FlatList
               horizontal
               showsHorizontalScrollIndicator={false}
@@ -874,7 +1093,7 @@ OUTPUT: Single photorealistic image showing only the new hairstyle applied natur
                     ]}
                     numberOfLines={1}
                   >
-                    {item.name}
+                    {getColorName(item.id, language)}
                   </Text>
                 </TouchableOpacity>
               )}
@@ -903,7 +1122,7 @@ OUTPUT: Single photorealistic image showing only the new hairstyle applied natur
                   <View style={styles.refAnalyzingOverlay}>
                     <ActivityIndicator size="large" color="#fff" />
                     <Text style={styles.refAnalyzingText}>
-                      Analyzing hairstyle...
+                      {t("analyzingHairstyle", language)}
                     </Text>
                   </View>
                 )}
@@ -913,7 +1132,7 @@ OUTPUT: Single photorealistic image showing only the new hairstyle applied natur
                   !refAnalysisFailed && (
                     <View style={styles.refDescriptionBox}>
                       <Text style={styles.refDescriptionLabel}>
-                        AI Analysis:
+                        {t("aiAnalysis", language)}
                       </Text>
                       <Text style={styles.refDescriptionText}>
                         {refImageDescription}
@@ -925,8 +1144,7 @@ OUTPUT: Single photorealistic image showing only the new hairstyle applied natur
                   <View style={styles.refErrorBox}>
                     <Text style={styles.refErrorIcon}>⚠️</Text>
                     <Text style={styles.refErrorText}>
-                      Could not analyze this image. Please try a different
-                      reference photo with a clearer view of the hairstyle.
+                      {t("analysisFailedTitle", language)}
                     </Text>
                     <TouchableOpacity
                       style={styles.refRetryButton}
@@ -936,7 +1154,7 @@ OUTPUT: Single photorealistic image showing only the new hairstyle applied natur
                       }}
                     >
                       <Text style={styles.refRetryButtonText}>
-                        Try Another Image
+                        {t("tryAnotherImage", language)}
                       </Text>
                     </TouchableOpacity>
                   </View>
@@ -950,11 +1168,13 @@ OUTPUT: Single photorealistic image showing only the new hairstyle applied natur
                 >
                   <Text style={styles.refUploadIcon}>📷</Text>
                   <Text style={styles.refUploadText}>
-                    Upload Reference Image
+                    {t("uploadRefImage", language)}
                   </Text>
                 </TouchableOpacity>
 
-                <Text style={styles.orDivider}>— or paste URL —</Text>
+                <Text style={styles.orDivider}>
+                  {t("orPasteUrl", language)}
+                </Text>
                 <View style={styles.urlInputRow}>
                   <TextInput
                     style={styles.urlInputField}
@@ -981,7 +1201,9 @@ OUTPUT: Single photorealistic image showing only the new hairstyle applied natur
                         setRefUrlInput("");
                       }}
                     >
-                      <Text style={styles.urlLoadButtonText}>Load</Text>
+                      <Text style={styles.urlLoadButtonText}>
+                        {t("load", language)}
+                      </Text>
                     </TouchableOpacity>
                   )}
                 </View>
@@ -992,12 +1214,14 @@ OUTPUT: Single photorealistic image showing only the new hairstyle applied natur
           <View style={styles.warningBox}>
             <Text style={styles.warningIcon}>⚠️</Text>
             <View style={styles.warningContent}>
-              <Text style={styles.warningTitle}>For Best Results</Text>
+              <Text style={styles.warningTitle}>
+                {t("forBestResults", language)}
+              </Text>
               <Text style={styles.warningText}>
-                • Use a close-up face shot showing the full hairstyle{"\n"}•
-                Front-facing reference images work best
-                {"\n"}• Ensure the hair is clearly visible{"\n"}• Side or angled
-                photos may produce less accurate results
+                • {t("refTip1", language)}
+                {"\n"}• {t("refTip2", language)}
+                {"\n"}• {t("refTip3", language)}
+                {"\n"}• {t("refTip4", language)}
               </Text>
             </View>
           </View>
@@ -1011,7 +1235,7 @@ OUTPUT: Single photorealistic image showing only the new hairstyle applied natur
                 onPress={generateImages}
               >
                 <Text style={styles.generateButtonText}>
-                  Generate Preview ✨
+                  {t("generatePreview", language)}
                 </Text>
               </TouchableOpacity>
             )}
@@ -1033,7 +1257,9 @@ OUTPUT: Single photorealistic image showing only the new hairstyle applied natur
             <Text style={styles.generatingIcon}>✨</Text>
           </View>
 
-          <Text style={styles.generatingTitle}>Creating Your Look</Text>
+          <Text style={styles.generatingTitle}>
+            {t("creatingYourLook", language)}
+          </Text>
           <Text style={styles.generatingSubtitle}>{generationStep}</Text>
 
           <View style={styles.progressContainer}>
@@ -1050,10 +1276,13 @@ OUTPUT: Single photorealistic image showing only the new hairstyle applied natur
 
           <View style={styles.timeEstimate}>
             <Text style={styles.timeEstimateLabel}>
-              Estimated time remaining
+              {t("estimatedTimeRemaining", language)}
             </Text>
             <Text style={styles.timeEstimateValue}>
-              ~{perceivedSeconds > 0 ? `${perceivedSeconds}s` : "Almost done!"}
+              ~
+              {perceivedSeconds > 0
+                ? `${perceivedSeconds}s`
+                : t("almostDone", language)}
             </Text>
           </View>
 
@@ -1061,12 +1290,12 @@ OUTPUT: Single photorealistic image showing only the new hairstyle applied natur
             <Text style={styles.funFactIcon}>💡</Text>
             <Text style={styles.funFactText}>
               {generationProgress < 30
-                ? "Analyzing your unique hair characteristics..."
+                ? t("funFact1", language)
                 : generationProgress < 60
-                ? "AI is learning your facial features..."
+                ? t("funFact2", language)
                 : generationProgress < 90
-                ? "Crafting the perfect hairstyle for you..."
-                : "Putting on the finishing touches..."}
+                ? t("funFact3", language)
+                : t("funFact4", language)}
             </Text>
           </View>
         </View>
@@ -1081,17 +1310,17 @@ OUTPUT: Single photorealistic image showing only the new hairstyle applied natur
         <StatusBar style="light" />
 
         <View style={styles.resultHeader}>
-          <Text style={styles.resultTitle}>Your New Look</Text>
+          <Text style={styles.resultTitle}>{t("yourNewLook", language)}</Text>
         </View>
 
         <View style={styles.comparisonContainer}>
           <View style={styles.comparisonImageWrapper}>
-            <Text style={styles.comparisonLabel}>BEFORE</Text>
+            <Text style={styles.comparisonLabel}>{t("before", language)}</Text>
             {userPhoto && (
               <Image
                 source={{ uri: userPhoto.uri }}
                 style={styles.comparisonImageFull}
-                resizeMode="cover"
+                resizeMode="contain"
               />
             )}
           </View>
@@ -1103,12 +1332,12 @@ OUTPUT: Single photorealistic image showing only the new hairstyle applied natur
           </View>
 
           <View style={styles.comparisonImageWrapper}>
-            <Text style={styles.comparisonLabel}>AFTER</Text>
+            <Text style={styles.comparisonLabel}>{t("after", language)}</Text>
             {generatedImage && (
               <Image
                 source={{ uri: generatedImage }}
                 style={styles.comparisonImageFull}
-                resizeMode="cover"
+                resizeMode="contain"
               />
             )}
           </View>
@@ -1123,16 +1352,272 @@ OUTPUT: Single photorealistic image showing only the new hairstyle applied natur
               setScreen(flowType === "style" ? "styleSelect" : "refUpload");
             }}
           >
-            <Text style={styles.resultActionText}>Try Another</Text>
+            <Text style={styles.resultActionText}>
+              {t("tryAnother", language)}
+            </Text>
           </TouchableOpacity>
 
           <TouchableOpacity
             style={[styles.resultActionBtn, styles.resultActionBtnPrimary]}
             onPress={resetApp}
           >
-            <Text style={styles.resultActionTextPrimary}>Start Over</Text>
+            <Text style={styles.resultActionTextPrimary}>
+              {t("startOver", language)}
+            </Text>
           </TouchableOpacity>
         </View>
+
+        <TouchableOpacity
+          style={styles.historyLinkBtn}
+          onPress={() => setScreen("history")}
+        >
+          <Text style={styles.historyLinkText}>
+            {t("viewHistory", language)} ({historyItems.length})
+          </Text>
+        </TouchableOpacity>
+      </SafeAreaView>
+    );
+  }
+
+  // HISTORY SCREEN
+  if (screen === "history") {
+    return (
+      <SafeAreaView style={styles.container}>
+        <StatusBar style="light" />
+        <View style={styles.historyContainer}>
+          <View style={styles.historyHeader}>
+            <TouchableOpacity
+              style={styles.backButton}
+              onPress={() => setScreen("initial")}
+            >
+              <Text style={styles.backText}>← {t("back", language)}</Text>
+            </TouchableOpacity>
+            <Text style={styles.screenTitleSmall}>
+              {t("myHairstyles", language)}
+            </Text>
+            {historyItems.length > 0 && (
+              <TouchableOpacity
+                style={styles.clearHistoryButton}
+                onPress={() => {
+                  Alert.alert(
+                    t("clearAll", language),
+                    t("deleteAllHistory", language),
+                    [
+                      { text: t("cancel", language), style: "cancel" },
+                      {
+                        text: t("clearAll", language),
+                        style: "destructive",
+                        onPress: async () => {
+                          await clearHistory();
+                          setHistoryItems([]);
+                        },
+                      },
+                    ]
+                  );
+                }}
+              >
+                <Text style={styles.clearHistoryText}>
+                  {t("clearAll", language)}
+                </Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {historyItems.length === 0 ? (
+            <View style={styles.historyEmptyState}>
+              <Text style={styles.historyEmptyIcon}>📸</Text>
+              <Text style={styles.historyEmptyTitle}>
+                {t("noHairstylesYet", language)}
+              </Text>
+              <Text style={styles.historyEmptyText}>
+                {t("hairstylesWillAppear", language)}
+              </Text>
+              <TouchableOpacity
+                style={styles.primaryButton}
+                onPress={() => setScreen("initial")}
+              >
+                <Text style={styles.primaryButtonText}>
+                  {t("createFirstLook", language)}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <FlatList
+              data={historyItems}
+              keyExtractor={(item) => item.id}
+              numColumns={2}
+              contentContainerStyle={styles.historyGrid}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={styles.historyCard}
+                  onPress={() => {
+                    setSelectedHistoryItem(item);
+                    setScreen("historyDetail");
+                  }}
+                  onLongPress={() => {
+                    Alert.alert(
+                      t("delete", language),
+                      `"${getHairstyleName(item.styleName, language)}" ${t(
+                        "deleteFromHistory",
+                        language
+                      )}`,
+                      [
+                        { text: t("cancel", language), style: "cancel" },
+                        {
+                          text: t("delete", language),
+                          style: "destructive",
+                          onPress: async () => {
+                            await deleteHistoryItem(item.id);
+                            setHistoryItems((prev) =>
+                              prev.filter((h) => h.id !== item.id)
+                            );
+                          },
+                        },
+                      ]
+                    );
+                  }}
+                >
+                  <Image
+                    source={{ uri: item.imageUri }}
+                    style={styles.historyCardImage}
+                    resizeMode="cover"
+                  />
+                  <View style={styles.historyCardOverlay}>
+                    <Text style={styles.historyCardStyle} numberOfLines={2}>
+                      {getHairstyleName(item.styleName, language)}
+                    </Text>
+                    <Text style={styles.historyCardDate}>
+                      {new Date(item.createdAt).toLocaleDateString()}
+                    </Text>
+                    {item.flowType === "ref" && (
+                      <View style={styles.historyRefBadge}>
+                        <Text style={styles.historyRefBadgeText}>REF</Text>
+                      </View>
+                    )}
+                  </View>
+                </TouchableOpacity>
+              )}
+            />
+          )}
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // HISTORY DETAIL SCREEN
+  if (screen === "historyDetail" && selectedHistoryItem) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <StatusBar style="light" />
+        <ScrollView style={styles.historyDetailContainer}>
+          {/* Header */}
+          <View style={styles.historyHeader}>
+            <TouchableOpacity
+              style={styles.backButton}
+              onPress={() => {
+                setSelectedHistoryItem(null);
+                setScreen("history");
+              }}
+            >
+              <Text style={styles.backText}>← {t("back", language)}</Text>
+            </TouchableOpacity>
+            <Text style={styles.screenTitleSmall}>
+              {getHairstyleName(selectedHistoryItem.styleName, language)}
+            </Text>
+          </View>
+
+          {/* Before/After Comparison */}
+          <View style={styles.historyComparisonSection}>
+            {/* Original Selfie */}
+            <View style={styles.historyComparisonItem}>
+              <Text style={styles.historyComparisonLabel}>
+                {t("before", language)}
+              </Text>
+              {selectedHistoryItem.originalPhotoUri ? (
+                <Image
+                  source={{ uri: selectedHistoryItem.originalPhotoUri }}
+                  style={styles.historyComparisonImage}
+                  resizeMode="cover"
+                />
+              ) : (
+                <View style={styles.historyNoOriginal}>
+                  <Text style={styles.historyNoOriginalText}>📷</Text>
+                </View>
+              )}
+            </View>
+
+            {/* Arrow */}
+            <View style={styles.historyComparisonArrow}>
+              <Text style={styles.historyComparisonArrowText}>↓</Text>
+            </View>
+
+            {/* Generated Image */}
+            <View style={styles.historyComparisonItem}>
+              <Text style={styles.historyComparisonLabel}>
+                {t("after", language)}
+              </Text>
+              <Image
+                source={{ uri: selectedHistoryItem.imageUri }}
+                style={styles.historyComparisonImage}
+                resizeMode="cover"
+              />
+            </View>
+          </View>
+
+          {/* Details */}
+          <View style={styles.historyDetailInfo}>
+            <Text style={styles.historyDetailLabel}>
+              {t("style", language)}
+            </Text>
+            <Text style={styles.historyDetailValue}>
+              {getHairstyleName(selectedHistoryItem.styleName, language)}
+            </Text>
+
+            <Text style={styles.historyDetailLabel}>{t("date", language)}</Text>
+            <Text style={styles.historyDetailValue}>
+              {new Date(selectedHistoryItem.createdAt).toLocaleString()}
+            </Text>
+
+            <Text style={styles.historyDetailLabel}>{t("type", language)}</Text>
+            <Text style={styles.historyDetailValue}>
+              {selectedHistoryItem.flowType === "ref"
+                ? t("referenceImage", language)
+                : t("styleSelection", language)}
+            </Text>
+          </View>
+
+          {/* Actions */}
+          <View style={styles.historyDetailActions}>
+            <TouchableOpacity
+              style={[styles.resultActionBtn, styles.resultActionBtnPrimary]}
+              onPress={() => {
+                Alert.alert(
+                  t("delete", language),
+                  t("deleteAllHistory", language),
+                  [
+                    { text: t("cancel", language), style: "cancel" },
+                    {
+                      text: t("delete", language),
+                      style: "destructive",
+                      onPress: async () => {
+                        await deleteHistoryItem(selectedHistoryItem.id);
+                        setHistoryItems((prev) =>
+                          prev.filter((h) => h.id !== selectedHistoryItem.id)
+                        );
+                        setSelectedHistoryItem(null);
+                        setScreen("history");
+                      },
+                    },
+                  ]
+                );
+              }}
+            >
+              <Text style={styles.resultActionText}>
+                🗑️ {t("delete", language)}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
       </SafeAreaView>
     );
   }
@@ -1143,6 +1628,23 @@ OUTPUT: Single photorealistic image showing only the new hairstyle applied natur
 // ============ STYLES ============
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#0a0a0f" },
+
+  // Language Toggle
+  languageToggle: {
+    position: "absolute",
+    top: 16,
+    right: 24,
+    backgroundColor: "#252530",
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    zIndex: 10,
+  },
+  languageToggleText: {
+    color: "#7c5cff",
+    fontSize: 14,
+    fontWeight: "700",
+  },
 
   // Initial Screen
   initialContent: { flexGrow: 1, padding: 24, paddingTop: 60 },
@@ -1229,8 +1731,8 @@ const styles = StyleSheet.create({
   primaryButtonText: { color: "#fff", fontSize: 18, fontWeight: "700" },
 
   // Photo Capture
-  photoCaptureContent: { flex: 1, padding: 24, paddingTop: 16 },
-  backButton: { marginBottom: 20 },
+  photoCaptureContent: { flex: 1, padding: 24, paddingTop: 50 },
+  backButton: { marginBottom: 16, paddingVertical: 8 },
   backText: { color: "#7c5cff", fontSize: 16, fontWeight: "600" },
   screenTitle: {
     fontSize: 28,
@@ -1447,12 +1949,12 @@ const styles = StyleSheet.create({
   filterChipText: { fontSize: 14, color: "#888", fontWeight: "600" },
   filterChipTextActive: { color: "#fff" },
   stylesScrollView: { flex: 1 },
-  stylesGrid: { flexDirection: "row", flexWrap: "wrap", padding: 12, gap: 12 },
+  stylesGrid: { flexDirection: "row", flexWrap: "wrap", padding: 12, gap: 10 },
   styleCard: {
-    width: (SCREEN_WIDTH - 48) / 3,
+    width: (SCREEN_WIDTH - 44) / 2,
     backgroundColor: "#1a1a24",
     borderRadius: 14,
-    padding: 10,
+    padding: 12,
     alignItems: "center",
     borderWidth: 2,
     borderColor: "transparent",
@@ -1460,21 +1962,34 @@ const styles = StyleSheet.create({
   styleCardActive: { borderColor: "#7c5cff", backgroundColor: "#1f1a30" },
   stylePreviewPlaceholder: {
     width: "100%",
-    aspectRatio: 0.85,
+    aspectRatio: 1,
     backgroundColor: "#252530",
     borderRadius: 10,
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 8,
+    marginBottom: 10,
+    overflow: "hidden",
+  },
+  stylePreviewImage: {
+    width: "100%",
+    height: "100%",
   },
   stylePreviewIcon: { fontSize: 32, opacity: 0.5 },
-  styleCardText: {
-    fontSize: 12,
+  styleCardTitle: {
+    fontSize: 14,
+    color: "#fff",
+    fontWeight: "700",
+    textAlign: "center",
+    marginBottom: 6,
+  },
+  styleCardTitleActive: { color: "#fff" },
+  styleCardDescription: {
+    fontSize: 11,
     color: "#888",
     textAlign: "center",
-    lineHeight: 16,
+    lineHeight: 15,
   },
-  styleCardTextActive: { color: "#fff", fontWeight: "600" },
+  styleCardDescriptionActive: { color: "#aaa" },
   styleCardCheck: {
     position: "absolute",
     top: 8,
@@ -1487,12 +2002,60 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   checkMarkSmall: { color: "#fff", fontSize: 12, fontWeight: "bold" },
+  selectedStyleSection: {
+    backgroundColor: "#1a1a24",
+    marginHorizontal: 12,
+    marginTop: 8,
+    borderRadius: 16,
+    padding: 16,
+    maxHeight: 280,
+  },
+  selectedStyleHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#252530",
+    paddingBottom: 10,
+    position: "relative",
+  },
+  selectedStyleTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#7c5cff",
+    textAlign: "center",
+    flex: 1,
+  },
+  selectedStyleCloseBtn: {
+    position: "absolute",
+    right: 0,
+    top: -4,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#252530",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  selectedStyleCloseText: {
+    color: "#888",
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  selectedStyleDescScroll: {
+    maxHeight: 120,
+    marginBottom: 12,
+  },
+  selectedStyleDesc: {
+    fontSize: 14,
+    color: "#ccc",
+    lineHeight: 22,
+  },
   generateButton: {
     backgroundColor: "#7c5cff",
-    marginHorizontal: 16,
-    marginVertical: 16,
-    paddingVertical: 18,
-    borderRadius: 16,
+    paddingVertical: 16,
+    borderRadius: 14,
     alignItems: "center",
   },
   generateButtonText: { color: "#fff", fontSize: 18, fontWeight: "700" },
@@ -1684,6 +2247,8 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     overflow: "hidden",
     backgroundColor: "#1a1a24",
+    justifyContent: "center",
+    alignItems: "center",
   },
   comparisonLabel: {
     position: "absolute",
@@ -1725,6 +2290,321 @@ const styles = StyleSheet.create({
   },
   resultActionText: { fontSize: 16, color: "#fff", fontWeight: "600" },
   resultActionTextPrimary: { fontSize: 16, color: "#fff", fontWeight: "700" },
+
+  // History Link on Result Screen
+  historyLinkBtn: {
+    paddingVertical: 12,
+    alignItems: "center",
+  },
+  historyLinkText: {
+    color: "#7c5cff",
+    fontSize: 15,
+    fontWeight: "600",
+  },
+
+  // History Button on Initial Screen
+  historyButtonInitial: {
+    marginTop: 16,
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: "center",
+    backgroundColor: "rgba(124, 92, 255, 0.15)",
+    borderWidth: 1,
+    borderColor: "rgba(124, 92, 255, 0.3)",
+  },
+  historyButtonInitialText: {
+    color: "#7c5cff",
+    fontSize: 15,
+    fontWeight: "600",
+  },
+
+  // Model Selector Button
+  modelSelectorButton: {
+    marginTop: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    backgroundColor: "#1a1a24",
+    borderWidth: 1,
+    borderColor: "#252530",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  modelSelectorLabel: {
+    color: "#888",
+    fontSize: 14,
+    fontWeight: "500",
+  },
+  modelSelectorValue: {
+    color: "#7c5cff",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+
+  // Model Selector Modal
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.8)",
+    justifyContent: "flex-end",
+  },
+  modalContent: {
+    backgroundColor: "#1a1a24",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    maxHeight: "70%",
+    paddingBottom: 32,
+  },
+  modalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: "#252530",
+    position: "relative",
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#fff",
+  },
+  modalCloseBtn: {
+    position: "absolute",
+    right: 20,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#252530",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  modalCloseText: {
+    color: "#888",
+    fontSize: 16,
+  },
+  modelList: {
+    padding: 16,
+  },
+  modelItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#252530",
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 2,
+    borderColor: "transparent",
+  },
+  modelItemActive: {
+    borderColor: "#7c5cff",
+    backgroundColor: "#1f1a30",
+  },
+  modelItemContent: {
+    flex: 1,
+  },
+  modelItemName: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#fff",
+    marginBottom: 4,
+  },
+  modelItemDesc: {
+    fontSize: 13,
+    color: "#888",
+    marginBottom: 4,
+  },
+  modelItemEndpoint: {
+    fontSize: 11,
+    color: "#555",
+    fontFamily: "monospace",
+  },
+  modelItemCheck: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: "#7c5cff",
+    alignItems: "center",
+    justifyContent: "center",
+    marginLeft: 12,
+  },
+  modelItemCheckText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "bold",
+  },
+
+  // History Screen
+  historyContainer: {
+    flex: 1,
+  },
+  historyHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: 16,
+    paddingTop: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: "#1a1a24",
+  },
+  clearHistoryButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  clearHistoryText: {
+    color: "#ff4444",
+    fontSize: 14,
+    fontWeight: "500",
+  },
+  historyGrid: {
+    padding: 12,
+  },
+  historyCard: {
+    flex: 1,
+    margin: 6,
+    borderRadius: 16,
+    overflow: "hidden",
+    backgroundColor: "#1a1a24",
+    maxWidth: (SCREEN_WIDTH - 48) / 2,
+  },
+  historyCardImage: {
+    width: "100%",
+    aspectRatio: 0.75,
+  },
+  historyCardOverlay: {
+    padding: 12,
+  },
+  historyCardStyle: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#fff",
+    marginBottom: 4,
+  },
+  historyCardDate: {
+    fontSize: 11,
+    color: "#666",
+  },
+  historyRefBadge: {
+    position: "absolute",
+    top: -40,
+    right: 8,
+    backgroundColor: "#7c5cff",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  historyRefBadgeText: {
+    fontSize: 10,
+    color: "#fff",
+    fontWeight: "700",
+  },
+  historyEmptyState: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 32,
+  },
+  historyEmptyIcon: {
+    fontSize: 64,
+    marginBottom: 16,
+  },
+  historyEmptyTitle: {
+    fontSize: 22,
+    fontWeight: "700",
+    color: "#fff",
+    marginBottom: 8,
+  },
+  historyEmptyText: {
+    fontSize: 15,
+    color: "#666",
+    textAlign: "center",
+    marginBottom: 24,
+  },
+
+  // History Detail Screen
+  historyDetailContainer: {
+    flex: 1,
+  },
+
+  // History Comparison Section
+  historyComparisonSection: {
+    marginHorizontal: 16,
+    marginBottom: 16,
+    backgroundColor: "#1a1a24",
+    borderRadius: 20,
+    padding: 16,
+  },
+  historyComparisonItem: {
+    alignItems: "center",
+  },
+  historyComparisonLabel: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#7c5cff",
+    letterSpacing: 1,
+    marginBottom: 8,
+    textTransform: "uppercase",
+  },
+  historyComparisonImage: {
+    width: SCREEN_WIDTH - 64,
+    aspectRatio: 3 / 4,
+    borderRadius: 14,
+    backgroundColor: "#252530",
+  },
+  historyComparisonArrow: {
+    alignItems: "center",
+    paddingVertical: 8,
+  },
+  historyComparisonArrowText: {
+    fontSize: 24,
+    color: "#555",
+  },
+  historyNoOriginal: {
+    width: SCREEN_WIDTH - 64,
+    aspectRatio: 3 / 4,
+    borderRadius: 14,
+    backgroundColor: "#252530",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  historyNoOriginalText: {
+    fontSize: 48,
+    opacity: 0.3,
+  },
+
+  historyDetailImageContainer: {
+    margin: 16,
+    borderRadius: 16,
+    overflow: "hidden",
+    backgroundColor: "#1a1a24",
+  },
+  historyDetailImage: {
+    width: "100%",
+    aspectRatio: 0.8,
+  },
+  historyDetailInfo: {
+    padding: 20,
+    marginHorizontal: 12,
+    backgroundColor: "#1a1a24",
+    borderRadius: 16,
+    marginTop: 8,
+  },
+  historyDetailLabel: {
+    fontSize: 12,
+    color: "#666",
+    fontWeight: "600",
+    marginTop: 12,
+  },
+  historyDetailValue: {
+    fontSize: 16,
+    color: "#fff",
+    fontWeight: "500",
+    marginTop: 4,
+  },
+  historyDetailActions: {
+    padding: 16,
+    marginTop: 8,
+  },
 
   // Common
   centerContent: {
