@@ -152,14 +152,16 @@ export const wrapForKlingModel = (basePrompt: string): string => {
 
 /**
  * Wrap prompt for Nano Banana / Gemini models
+ * Add explicit edit instruction for image transformation
  */
 export const wrapForNanoBananaModel = (basePrompt: string): string => {
-  return basePrompt;
+  return `Edit this image: ${basePrompt}`;
 };
 
 /**
  * Wrap prompt for FLUX models
+ * FLUX Kontext models understand edit instructions
  */
 export const wrapForFluxModel = (basePrompt: string): string => {
-  return basePrompt;
+  return `Edit this photo: ${basePrompt}`;
 };
