@@ -2596,8 +2596,9 @@ const styles = StyleSheet.create({
     marginTop: 4,
     fontWeight: "600",
   },
-  comparisonContainer: { padding: 16 },
+  comparisonContainer: { padding: 16, alignItems: "center" },
   comparisonImageWrapper: {
+    width: SCREEN_WIDTH * 0.7,
     borderRadius: 16,
     overflow: "hidden",
     backgroundColor: "#1a1a24",
