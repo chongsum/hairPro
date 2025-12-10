@@ -1567,7 +1567,9 @@ export default function App() {
         <ScrollView contentContainerStyle={styles.resultScrollContent}>
           <View style={styles.resultHeader}>
             <Text style={styles.resultTitle}>{t("yourNewLook", language)}</Text>
-            <Text style={styles.resultSubtitle}>{currentStyleName}</Text>
+            <Text style={styles.resultSubtitle}>
+              {getHairstyleName(currentStyleName, language)}
+            </Text>
           </View>
 
           {/* Original Photo */}
