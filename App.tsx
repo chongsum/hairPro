@@ -2596,9 +2596,9 @@ const styles = StyleSheet.create({
     marginTop: 4,
     fontWeight: "600",
   },
-  comparisonContainer: { padding: 16, alignItems: "center" },
+  comparisonContainer: { paddingHorizontal: 16, paddingVertical: 8 },
   comparisonImageWrapper: {
-    width: SCREEN_WIDTH * 0.7,
+    width: "100%",
     borderRadius: 16,
     overflow: "hidden",
     backgroundColor: "#1a1a24",
@@ -2644,7 +2644,7 @@ const styles = StyleSheet.create({
     paddingRight: 16,
   },
   modelResultCard: {
-    width: SCREEN_WIDTH * 0.7,
+    width: SCREEN_WIDTH - 32,
     borderRadius: 16,
     overflow: "hidden",
     backgroundColor: "#1a1a24",
